@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from .patterns import classify_risk as _pattern_classify_risk
 from .types import (
     DecisionRequest,
     DecisionResponse,
@@ -24,12 +25,6 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Default L3 trigger keywords (from FailSafe risk_grading.yaml)
-_DEFAULT_L3_TRIGGERS = frozenset({
-    "auth", "login", "crypto", "payment", "private_key",
-    "password", "api_key", "secret", "credential", "token",
-})
 
 
 def query_shadow_genome(ledger_path: Path, agent_did: str = "") -> list[ShadowGenomeEntry]:
@@ -91,18 +86,16 @@ class LocalFailSafeClient:
     Args:
         config_dir: Path to FailSafe config directory (default: .failsafe/config).
         ledger_path: Path to SQLite ledger (default: .failsafe/ledger/ledger.db).
-        l3_triggers: Set of keywords that trigger L3 risk grade.
     """
 
     def __init__(
         self,
         config_dir: str | Path = ".failsafe/config",
         ledger_path: str | Path = ".failsafe/ledger/ledger.db",
-        l3_triggers: frozenset[str] | None = None,
     ) -> None:
         self.config_dir = Path(config_dir)
         self.ledger_path = Path(ledger_path)
-        self.l3_triggers = l3_triggers or _DEFAULT_L3_TRIGGERS
+        self._extra_triggers: frozenset[str] = frozenset()
         self._policies: dict[str, Any] = {}
         self._load_policies()
 
@@ -126,7 +119,7 @@ class LocalFailSafeClient:
         risk_policy = self._policies.get("risk_grading", {})
         triggers = risk_policy.get("l3_triggers", [])
         if triggers:
-            self.l3_triggers = frozenset(triggers)
+            self._extra_triggers = frozenset(triggers)
 
     def evaluate(self, request: DecisionRequest) -> DecisionResponse:
         """Evaluate a governance decision using local heuristics.
@@ -159,12 +152,7 @@ class LocalFailSafeClient:
 
     def classify_risk(self, file_path: str, content: str = "") -> RiskGrade:
         """Classify risk grade for a file path and optional content."""
-        combined = f"{file_path} {content}".lower()
-        if any(trigger in combined for trigger in self.l3_triggers):
-            return RiskGrade.L3
-        if any(ext in file_path.lower() for ext in (".py", ".js", ".ts", ".rs")):
-            return RiskGrade.L2
-        return RiskGrade.L1
+        return _pattern_classify_risk(file_path, content, self._extra_triggers)
 
     def get_shadow_genome(self, agent_did: str = "") -> list[ShadowGenomeEntry]:
         """Retrieve Shadow Genome entries from the ledger."""
@@ -172,9 +160,10 @@ class LocalFailSafeClient:
 
     def _classify_request(self, request: DecisionRequest) -> RiskGrade:
         """Determine risk grade from request content."""
-        searchable = f"{request.action} {request.artifact_path} {json.dumps(request.payload)}".lower()
-        if any(trigger in searchable for trigger in self.l3_triggers):
-            return RiskGrade.L3
+        content = request.payload.get("content", "")
+        grade = _pattern_classify_risk(request.artifact_path, content, self._extra_triggers)
+        if grade != RiskGrade.L1:
+            return grade
         if request.action in ("file.write", "file.delete"):
             return RiskGrade.L2
         return RiskGrade.L1

@@ -30,8 +30,31 @@ from .policy_provider import ShadowGenomePolicyProvider
 from .sli import FailSafeComplianceSLI, create_sre_sli, decision_to_signal
 from .audit_sink import FailSafeAuditSink
 from .escalation import FailSafeApprovalBackend
+from .shadow_genome import (
+    RemediationStatus,
+    ShadowGenomeStore,
+    InMemoryShadowGenomeStore,
+    classify_failure_mode,
+    generate_negative_constraint,
+    get_constraints_for_agent,
+)
+from .patterns import (
+    PatternCategory,
+    PatternSeverity,
+    HeuristicPattern,
+    PatternMatch,
+    match_content,
+)
+from .trust import (
+    TrustConfig,
+    DEFAULT_TRUST_CONFIG,
+    determine_stage,
+    apply_outcome,
+    is_probationary,
+    calculate_influence_weight,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # Types
@@ -68,4 +91,24 @@ __all__ = [
     "FailSafeAuditSink",
     # Escalation (→ FailSafe L3)
     "FailSafeApprovalBackend",
+    # Shadow Genome (failure DNA)
+    "RemediationStatus",
+    "ShadowGenomeStore",
+    "InMemoryShadowGenomeStore",
+    "classify_failure_mode",
+    "generate_negative_constraint",
+    "get_constraints_for_agent",
+    # Heuristic Patterns (CWE-referenced)
+    "PatternCategory",
+    "PatternSeverity",
+    "HeuristicPattern",
+    "PatternMatch",
+    "match_content",
+    # Trust Dynamics (CBT/KBT/IBT)
+    "TrustConfig",
+    "DEFAULT_TRUST_CONFIG",
+    "determine_stage",
+    "apply_outcome",
+    "is_probationary",
+    "calculate_influence_weight",
 ]

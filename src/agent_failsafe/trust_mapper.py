@@ -11,7 +11,7 @@ import hashlib
 import logging
 import re
 
-from .types import PersonaType, TrustStage
+from .types import DecisionResponse, PersonaType, TrustStage
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,22 @@ class FailSafeTrustMapper:
 
         trust_score = (mesh_score - low) / (high - low) if high > low else 0.0
         return max(0.0, min(1.0, trust_score)), stage
+
+    def update_trust(
+        self,
+        current_score: float,
+        decision: DecisionResponse,
+    ) -> float:
+        """Apply governance outcome to trust score. Returns new score."""
+        from .trust import apply_outcome
+
+        return apply_outcome(current_score, decision.allowed, decision.risk_grade.value)
+
+    def get_trust_stage(self, score: float) -> TrustStage:
+        """Determine trust stage from score."""
+        from .trust import determine_stage
+
+        return determine_stage(score)
 
     @staticmethod
     def extract_persona(myth_did: str) -> PersonaType | None:
