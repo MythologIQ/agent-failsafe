@@ -21,7 +21,9 @@ from .types import (
     TrustStage,
     VerdictDecision,
 )
-from .client import LocalFailSafeClient
+from .client import LocalFailSafeClient, query_shadow_genome
+from .mcp_client import MCPFailSafeClient, MCPToolError
+from .ring_adapter import FailSafeRingAdapter
 from .interceptor import FailSafeInterceptor
 from .trust_mapper import FailSafeTrustMapper
 from .policy_provider import ShadowGenomePolicyProvider
@@ -29,7 +31,7 @@ from .sli import FailSafeComplianceSLI, create_sre_sli, decision_to_signal
 from .audit_sink import FailSafeAuditSink
 from .escalation import FailSafeApprovalBackend
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Types
@@ -46,6 +48,12 @@ __all__ = [
     "VerdictDecision",
     # Client
     "LocalFailSafeClient",
+    "query_shadow_genome",
+    # MCP Client (→ FailSafe VS Code extension)
+    "MCPFailSafeClient",
+    "MCPToolError",
+    # Ring adapter (→ hypervisor ExecutionRing)
+    "FailSafeRingAdapter",
     # Interceptor (ToolCallInterceptor)
     "FailSafeInterceptor",
     # Trust mapping (did:myth ↔ did:mesh)

@@ -32,6 +32,55 @@ _DEFAULT_L3_TRIGGERS = frozenset({
 })
 
 
+def query_shadow_genome(ledger_path: Path, agent_did: str = "") -> list[ShadowGenomeEntry]:
+    """Query Shadow Genome entries from a FailSafe SQLite ledger.
+
+    Shared by LocalFailSafeClient and MCPFailSafeClient. Reads
+    DIVERGENCE_DECLARED events and maps them to ShadowGenomeEntry instances.
+
+    Args:
+        ledger_path: Path to the FailSafe SQLite ledger database.
+        agent_did: Optional agent DID filter.
+
+    Returns:
+        List of ShadowGenomeEntry, newest first. Max 100 entries.
+    """
+    if not ledger_path.exists():
+        return []
+
+    entries: list[ShadowGenomeEntry] = []
+    try:
+        conn = sqlite3.connect(str(ledger_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM ledger WHERE eventType = 'DIVERGENCE_DECLARED'"
+        params: list[str] = []
+        if agent_did:
+            query += " AND agentDid = ?"
+            params.append(agent_did)
+        query += " ORDER BY timestamp DESC LIMIT 100"
+
+        cursor.execute(query, params)
+        for row in cursor.fetchall():
+            payload = json.loads(row["payload"]) if row["payload"] else {}
+            entries.append(ShadowGenomeEntry(
+                entry_id=str(row["id"]),
+                agent_did=row["agentDid"],
+                failure_mode=FailureMode(payload.get("failureMode", "OTHER")),
+                input_vector=payload.get("inputVector", ""),
+                causal_vector=payload.get("causalVector", ""),
+                negative_constraint=payload.get("negativeConstraint", ""),
+                remediation_status=payload.get("remediationStatus", "UNRESOLVED"),
+                created_at=row["timestamp"],
+            ))
+        conn.close()
+    except Exception as exc:
+        logger.warning("Failed to read Shadow Genome from ledger: %s", exc)
+
+    return entries
+
+
 class LocalFailSafeClient:
     """FailSafe client that reads policies and ledger directly.
 
@@ -118,45 +167,8 @@ class LocalFailSafeClient:
         return RiskGrade.L1
 
     def get_shadow_genome(self, agent_did: str = "") -> list[ShadowGenomeEntry]:
-        """Retrieve Shadow Genome entries from the ledger.
-
-        Queries the FailSafe SQLite ledger for DIVERGENCE_DECLARED events
-        and maps them to ShadowGenomeEntry instances.
-        """
-        if not self.ledger_path.exists():
-            return []
-
-        entries: list[ShadowGenomeEntry] = []
-        try:
-            conn = sqlite3.connect(str(self.ledger_path))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-
-            query = "SELECT * FROM ledger WHERE eventType = 'DIVERGENCE_DECLARED'"
-            params: list[str] = []
-            if agent_did:
-                query += " AND agentDid = ?"
-                params.append(agent_did)
-            query += " ORDER BY timestamp DESC LIMIT 100"
-
-            cursor.execute(query, params)
-            for row in cursor.fetchall():
-                payload = json.loads(row["payload"]) if row["payload"] else {}
-                entries.append(ShadowGenomeEntry(
-                    entry_id=str(row["id"]),
-                    agent_did=row["agentDid"],
-                    failure_mode=FailureMode(payload.get("failureMode", "OTHER")),
-                    input_vector=payload.get("inputVector", ""),
-                    causal_vector=payload.get("causalVector", ""),
-                    negative_constraint=payload.get("negativeConstraint", ""),
-                    remediation_status=payload.get("remediationStatus", "UNRESOLVED"),
-                    created_at=row["timestamp"],
-                ))
-            conn.close()
-        except Exception as exc:
-            logger.warning("Failed to read Shadow Genome from ledger: %s", exc)
-
-        return entries
+        """Retrieve Shadow Genome entries from the ledger."""
+        return query_shadow_genome(self.ledger_path, agent_did)
 
     def _classify_request(self, request: DecisionRequest) -> RiskGrade:
         """Determine risk grade from request content."""
