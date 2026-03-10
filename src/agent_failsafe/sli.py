@@ -159,13 +159,14 @@ def decision_to_signal(response: DecisionResponse, source: str = "failsafe") -> 
 
     signal_type = _SignalType.POLICY_VIOLATION
 
+    reason = (response.reason or "")[:200]
     return _Signal(
         signal_type=signal_type,
         source=source,
         value=0.0 if not response.allowed else 1.0,
         threshold=0.0,
         message=(
-            f"FailSafe {response.verdict.value}: {response.reason} "
+            f"FailSafe {response.verdict.value}: {reason} "
             f"(risk={response.risk_grade.value})"
         ),
         metadata={

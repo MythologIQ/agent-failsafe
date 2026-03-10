@@ -1,8 +1,4 @@
-"""MCP-based FailSafe client.
-
-Communicates with the FailSafe VS Code extension (or standalone MCP server)
-via JSON-RPC over stdio. Implements the FailSafeClient protocol.
-"""
+"""MCP-based FailSafe client — JSON-RPC over stdio, implements FailSafeClient."""
 
 from __future__ import annotations
 
@@ -71,11 +67,7 @@ def _read_line(
 
 
 class MCPFailSafeClient:
-    """FailSafe client that communicates via MCP (JSON-RPC over stdio).
-
-    Spawns the FailSafe MCP server as a subprocess and sends tool calls
-    using the Model Context Protocol.
-    """
+    """MCP-based FailSafe client using JSON-RPC over stdio."""
 
     def __init__(
         self,
@@ -198,10 +190,15 @@ class MCPFailSafeClient:
         except OSError as exc:
             raise MCPToolError("initialize", f"Failed to start MCP server: {exc}") from exc
 
-        self._send_initialize_handshake()
+        try:
+            self._send_initialize_handshake()
+        except Exception:
+            self._process.terminate()
+            self._process = None
+            raise
 
     def _send_initialize_handshake(self) -> None:
-        """Send MCP initialize request and validate response."""
+        """Send MCP initialize request."""
         assert self._process is not None
         assert self._process.stdin is not None
         assert self._process.stdout is not None
@@ -214,7 +211,7 @@ class MCPFailSafeClient:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "agent-failsafe", "version": "0.3.0"},
+                "clientInfo": {"name": "agent-failsafe", "version": "0.4.0"},
             },
         }
         self._process.stdin.write(json.dumps(init_request).encode() + b"\n")
@@ -227,7 +224,7 @@ class MCPFailSafeClient:
             raise MCPToolError("initialize", response["error"].get("message", "init failed"))
 
     def _fetch_intent_id(self) -> str:
-        """Call qorelogic_status, extract active_intent. Cache result."""
+        """Extract active_intent from qorelogic_status."""
         status = self._call_tool("qorelogic_status", {})
         intent_id = status.get("active_intent", "")
         if intent_id:

@@ -109,15 +109,15 @@ class TestLocalFailSafeClient:
         entries = client.get_shadow_genome()
         assert entries == []
 
-    def test_table_ensured_flag(self, tmp_failsafe):
-        """_table_ensured prevents repeated CREATE TABLE calls."""
+    def test_persistent_ledger_conn(self, tmp_failsafe):
+        """Ledger connection is opened lazily and reused."""
         config_dir, ledger_path = tmp_failsafe
         client = LocalFailSafeClient(config_dir=config_dir, ledger_path=ledger_path)
-        assert client._table_ensured is False
+        assert client._ledger_conn is None
 
         client.evaluate(DecisionRequest(action="file.write", agent_did="did:myth:scrivener:abc"))
-        assert client._table_ensured is True
+        assert client._ledger_conn is not None
+        conn_id = id(client._ledger_conn)
 
-        # Second call should skip CREATE TABLE (flag stays True)
         client.evaluate(DecisionRequest(action="file.read", agent_did="did:myth:scrivener:abc"))
-        assert client._table_ensured is True
+        assert id(client._ledger_conn) == conn_id  # Same connection reused

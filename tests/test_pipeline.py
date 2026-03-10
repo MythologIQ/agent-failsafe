@@ -240,3 +240,28 @@ class TestCreatePipeline:
         sli = MagicMock()
         pipeline = create_pipeline(client, sli=sli)
         assert pipeline.sli is sli
+
+
+class TestFailOpenFailClosed:
+    def test_fail_closed_raises(self) -> None:
+        """fail_open=False re-raises client exceptions."""
+        client = MagicMock()
+        client.evaluate.side_effect = RuntimeError("connection lost")
+        pipeline = GovernancePipeline(client=client, fail_open=False)
+        with pytest.raises(RuntimeError, match="connection lost"):
+            pipeline.evaluate(_req())
+
+    def test_fail_open_default_is_true(self) -> None:
+        """Default fail_open is True for backward compatibility."""
+        client = MagicMock()
+        pipeline = GovernancePipeline(client=client)
+        assert pipeline.fail_open is True
+
+    def test_fail_open_returns_allowed(self) -> None:
+        """fail_open=True returns allowed result on client error."""
+        client = MagicMock()
+        client.evaluate.side_effect = RuntimeError("down")
+        pipeline = GovernancePipeline(client=client, fail_open=True)
+        result = pipeline.evaluate(_req())
+        assert result.allowed is True
+        assert "fail-open" in result.halted_reason

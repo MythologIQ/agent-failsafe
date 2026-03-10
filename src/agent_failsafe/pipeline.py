@@ -85,6 +85,7 @@ class GovernancePipeline:
         sli: FailSafeComplianceSLI | None = None,
         circuit_breaker_fn: Callable[[str], bool] | None = None,
         kill_switch_fn: Callable[[str, str, str], Any] | None = None,
+        fail_open: bool = True,
     ) -> None:
         self.client = client
         self.ring_adapter = ring_adapter or FailSafeRingAdapter()
@@ -92,6 +93,7 @@ class GovernancePipeline:
         self.sli = sli
         self.circuit_breaker_fn = circuit_breaker_fn
         self.kill_switch_fn = kill_switch_fn
+        self.fail_open = fail_open
 
     def evaluate(self, request: DecisionRequest) -> PipelineResult:
         """Run the full governance pipeline and return an immutable result."""
@@ -124,7 +126,9 @@ class GovernancePipeline:
         try:
             return self.client.evaluate(request)
         except Exception as exc:
-            logger.error("Pipeline governance eval failed: %s", exc)
+            logger.critical("Pipeline governance eval failed: %s", exc)
+            if not self.fail_open:
+                raise
             return None
 
     def _check_governance_halt(self, response: DecisionResponse) -> PipelineResult | None:

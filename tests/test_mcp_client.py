@@ -297,3 +297,25 @@ class TestMCPFailSafeClient:
 
         result = _read_line(mock_proc, timeout=5.0)
         assert result == b'{"ok": true}\n'
+
+    def test_handshake_failure_cleans_subprocess(self):
+        """If handshake fails, subprocess is terminated and _process set to None."""
+        mock_proc = MagicMock(spec=subprocess.Popen)
+        mock_proc.poll.return_value = None
+        mock_proc.stdin = MagicMock()
+        mock_proc.stdout = MagicMock()
+        mock_proc.stderr = MagicMock()
+        # Handshake returns an error response
+        error_resp = json.dumps({
+            "jsonrpc": "2.0", "id": 1,
+            "error": {"code": -1, "message": "protocol mismatch"},
+        }).encode() + b"\n"
+        mock_proc.stdout.readline = MagicMock(return_value=error_resp)
+
+        with patch("subprocess.Popen", return_value=mock_proc):
+            client = MCPFailSafeClient(["node", "mcp.js"])
+            with pytest.raises(MCPToolError, match="protocol mismatch"):
+                client._ensure_connected()
+
+        mock_proc.terminate.assert_called_once()
+        assert client._process is None

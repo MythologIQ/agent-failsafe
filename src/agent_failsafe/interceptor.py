@@ -28,12 +28,12 @@ def _ensure_imports() -> None:
         _ToolCallResult = ToolCallResult
 
 
-def _fail_open_result(exc: Exception) -> Any:
+def _fail_open_result() -> Any:
     """Build a fail-open ToolCallResult when FailSafe is unavailable."""
     return _ToolCallResult(
         allowed=True,
-        reason=f"FailSafe unavailable ({exc}); fail-open policy applied",
-        audit_entry={"failsafe_error": str(exc), "fail_open": True},
+        reason="FailSafe unavailable; fail-open policy applied",
+        audit_entry={"fail_open": True},
     )
 
 
@@ -77,11 +77,13 @@ class FailSafeInterceptor:
         default_agent_did: str = "did:myth:scrivener:unknown",
         block_on_l3: bool = True,
         on_decision: DecisionCallback | None = None,
+        fail_open: bool = True,
     ) -> None:
         self.client = client
         self.default_agent_did = default_agent_did
         self.block_on_l3 = block_on_l3
         self.on_decision = on_decision
+        self.fail_open = fail_open
         self._decision_count = 0
         self._block_count = 0
 
@@ -107,9 +109,11 @@ class FailSafeInterceptor:
         try:
             response = self.client.evaluate(decision_req)
         except Exception as exc:
-            logger.error("FailSafe evaluation failed: %s", exc)
+            logger.critical("FailSafe evaluation failed: %s", exc)
             self._decision_count += 1
-            return _fail_open_result(exc)
+            if not self.fail_open:
+                raise
+            return _fail_open_result()
 
         self._decision_count += 1
         if self.on_decision is not None:

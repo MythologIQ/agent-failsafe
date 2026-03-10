@@ -168,3 +168,23 @@ class TestBatchTranslation:
 
     def test_empty_list(self) -> None:
         assert decisions_to_webhook_events([]) == []
+
+
+class TestArtifactPathSanitization:
+    def test_artifact_path_basename_only(self) -> None:
+        """Details should only contain the filename, not the full path."""
+        req = DecisionRequest(
+            action="file.write",
+            agent_did="did:myth:scrivener:abc",
+            artifact_path="/home/user/secrets/credentials.json",
+        )
+        resp = _resp(allowed=False, verdict=VerdictDecision.BLOCK)
+        event = decision_to_webhook_event(req, resp)
+        path_in_details = event.details["artifact_path"]
+        assert path_in_details == "credentials.json"
+        assert "/" not in path_in_details
+
+    def test_empty_artifact_path(self) -> None:
+        """Empty artifact_path produces empty string in details."""
+        event = decision_to_webhook_event(_req(), _resp())
+        assert event.details["artifact_path"] == ""
