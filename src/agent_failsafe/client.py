@@ -26,6 +26,35 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
+_EVALUATIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS evaluations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        action TEXT NOT NULL,
+        agent_did TEXT NOT NULL,
+        risk_grade TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        allowed INTEGER NOT NULL,
+        nonce TEXT,
+        reason TEXT
+    )
+"""
+
+
+def _row_to_genome_entry(row: Any) -> ShadowGenomeEntry:
+    """Map a SQLite Row to a ShadowGenomeEntry."""
+    payload = json.loads(row["payload"]) if row["payload"] else {}
+    return ShadowGenomeEntry(
+        entry_id=str(row["id"]),
+        agent_did=row["agentDid"],
+        failure_mode=FailureMode(payload.get("failureMode", "OTHER")),
+        input_vector=payload.get("inputVector", ""),
+        causal_vector=payload.get("causalVector", ""),
+        negative_constraint=payload.get("negativeConstraint", ""),
+        remediation_status=payload.get("remediationStatus", "UNRESOLVED"),
+        created_at=row["timestamp"],
+    )
+
 
 def query_shadow_genome(ledger_path: Path, agent_did: str = "") -> list[ShadowGenomeEntry]:
     """Query Shadow Genome entries from a FailSafe SQLite ledger.
@@ -46,30 +75,22 @@ def query_shadow_genome(ledger_path: Path, agent_did: str = "") -> list[ShadowGe
     entries: list[ShadowGenomeEntry] = []
     try:
         conn = sqlite3.connect(str(ledger_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        query = "SELECT * FROM ledger WHERE eventType = 'DIVERGENCE_DECLARED'"
-        params: list[str] = []
-        if agent_did:
-            query += " AND agentDid = ?"
-            params.append(agent_did)
-        query += " ORDER BY timestamp DESC LIMIT 100"
+            query = "SELECT * FROM ledger WHERE eventType = 'DIVERGENCE_DECLARED'"
+            params: list[str] = []
+            if agent_did:
+                query += " AND agentDid = ?"
+                params.append(agent_did)
+            query += " ORDER BY timestamp DESC LIMIT 100"
 
-        cursor.execute(query, params)
-        for row in cursor.fetchall():
-            payload = json.loads(row["payload"]) if row["payload"] else {}
-            entries.append(ShadowGenomeEntry(
-                entry_id=str(row["id"]),
-                agent_did=row["agentDid"],
-                failure_mode=FailureMode(payload.get("failureMode", "OTHER")),
-                input_vector=payload.get("inputVector", ""),
-                causal_vector=payload.get("causalVector", ""),
-                negative_constraint=payload.get("negativeConstraint", ""),
-                remediation_status=payload.get("remediationStatus", "UNRESOLVED"),
-                created_at=row["timestamp"],
-            ))
-        conn.close()
+            cursor.execute(query, params)
+            for row in cursor.fetchall():
+                entries.append(_row_to_genome_entry(row))
+        finally:
+            conn.close()
     except Exception as exc:
         logger.warning("Failed to read Shadow Genome from ledger: %s", exc)
 
@@ -97,6 +118,7 @@ class LocalFailSafeClient:
         self.ledger_path = Path(ledger_path)
         self._extra_triggers: frozenset[str] = frozenset()
         self._policies: dict[str, Any] = {}
+        self._table_ensured = False
         self._load_policies()
 
     def _load_policies(self) -> None:
@@ -183,35 +205,27 @@ class LocalFailSafeClient:
 
         try:
             conn = sqlite3.connect(str(self.ledger_path))
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS evaluations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    agent_did TEXT NOT NULL,
-                    risk_grade TEXT NOT NULL,
-                    verdict TEXT NOT NULL,
-                    allowed INTEGER NOT NULL,
-                    nonce TEXT,
-                    reason TEXT
+            try:
+                if not self._table_ensured:
+                    conn.execute(_EVALUATIONS_DDL)
+                    self._table_ensured = True
+                conn.execute(
+                    """INSERT INTO evaluations
+                       (timestamp, action, agent_did, risk_grade, verdict, allowed, nonce, reason)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        response.timestamp,
+                        request.action,
+                        request.agent_did,
+                        response.risk_grade.value,
+                        response.verdict.value,
+                        int(response.allowed),
+                        response.nonce,
+                        response.reason,
+                    ),
                 )
-            """)
-            conn.execute(
-                """INSERT INTO evaluations
-                   (timestamp, action, agent_did, risk_grade, verdict, allowed, nonce, reason)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    response.timestamp,
-                    request.action,
-                    request.agent_did,
-                    response.risk_grade.value,
-                    response.verdict.value,
-                    int(response.allowed),
-                    response.nonce,
-                    response.reason,
-                ),
-            )
-            conn.commit()
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
         except Exception as exc:
             logger.debug("Ledger write failed (non-critical): %s", exc)

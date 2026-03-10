@@ -35,6 +35,24 @@ def _ensure_imports() -> None:
         _EscalationDecision = EscalationDecision
 
 
+def _build_l3_request(request: Any) -> tuple[str, DecisionRequest]:
+    """Build an L3 governance request from an escalation request.
+
+    Returns (request_id, decision_request).
+    """
+    request_id = getattr(request, "request_id", str(uuid.uuid4()))
+    return request_id, DecisionRequest(
+        action="l3.approve",
+        agent_did=getattr(request, "agent_id", "unknown"),
+        payload={
+            "escalation_id": request_id,
+            "original_action": getattr(request, "action", "unknown"),
+            "reason": getattr(request, "reason", ""),
+            "context": getattr(request, "context_snapshot", {}),
+        },
+    )
+
+
 class FailSafeApprovalBackend:
     """Escalation backend that delegates to FailSafe L3 approval workflow.
 
@@ -54,10 +72,12 @@ class FailSafeApprovalBackend:
         self,
         client: FailSafeClient,
         overseer_did: str = "did:myth:overseer:local",
+        max_requests: int = 1000,
     ) -> None:
         self.client = client
         self.overseer_did = overseer_did
         self._requests: dict[str, dict[str, Any]] = {}
+        self._max_requests = max_requests
         self._lock = threading.Lock()
 
     def submit(self, request: Any) -> None:
@@ -66,22 +86,7 @@ class FailSafeApprovalBackend:
         Translates the Agent OS EscalationRequest to a FailSafe L3
         governance evaluation and stores the result.
         """
-        request_id = getattr(request, "request_id", str(uuid.uuid4()))
-        agent_id = getattr(request, "agent_id", "unknown")
-        action = getattr(request, "action", "unknown")
-        reason = getattr(request, "reason", "")
-
-        # Submit to FailSafe as L3 evaluation
-        decision_req = DecisionRequest(
-            action="l3.approve",
-            agent_did=agent_id,
-            payload={
-                "escalation_id": request_id,
-                "original_action": action,
-                "reason": reason,
-                "context": getattr(request, "context_snapshot", {}),
-            },
-        )
+        request_id, decision_req = _build_l3_request(request)
 
         try:
             response = self.client.evaluate(decision_req)
@@ -92,6 +97,9 @@ class FailSafeApprovalBackend:
                     "status": "pending",
                     "submitted_at": datetime.now(timezone.utc),
                 }
+            if len(self._requests) > self._max_requests:
+                oldest_key = next(iter(self._requests))
+                del self._requests[oldest_key]
             logger.info("L3 escalation submitted: %s (risk=%s)", request_id, response.risk_grade.value)
         except Exception as exc:
             logger.error("Failed to submit L3 escalation: %s", exc)

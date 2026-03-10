@@ -153,13 +153,21 @@ _SEVERITY_ORDER: dict[PatternSeverity, int] = {
 }
 
 
+_COMPILED_DEFAULTS: list[tuple[HeuristicPattern, re.Pattern[str]]] = [
+    (p, re.compile(p.pattern)) for p in DEFAULT_PATTERNS
+]
+
+
 def match_content(
     content: str,
     patterns: Sequence[HeuristicPattern] | None = None,
 ) -> list[PatternMatch]:
     """Scan content lines against heuristic patterns, sorted by severity."""
-    active = patterns if patterns is not None else DEFAULT_PATTERNS
-    compiled = [(p, re.compile(p.pattern)) for p in active]
+    compiled = (
+        _COMPILED_DEFAULTS
+        if patterns is None
+        else [(p, re.compile(p.pattern)) for p in patterns]
+    )
     matches: list[PatternMatch] = []
 
     for line_number, line in enumerate(content.splitlines(), start=1):

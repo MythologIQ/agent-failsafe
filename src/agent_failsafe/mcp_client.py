@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,22 @@ def _verdict_to_response(verdict_dict: dict[str, Any]) -> DecisionResponse:
     )
 
 
+def _read_line(
+    process: subprocess.Popen[bytes],
+    timeout: float,
+) -> bytes:
+    """Read a line from subprocess stdout with timeout (Windows-safe)."""
+    timer = threading.Timer(timeout, process.kill)
+    timer.start()
+    try:
+        line = process.stdout.readline()
+        if not line:
+            raise MCPToolError("timeout", "MCP server EOF or killed by timeout")
+        return line
+    finally:
+        timer.cancel()
+
+
 class MCPFailSafeClient:
     """FailSafe client that communicates via MCP (JSON-RPC over stdio).
 
@@ -66,15 +83,15 @@ class MCPFailSafeClient:
         intent_id: str = "",
         ledger_path: str | Path = ".failsafe/ledger/ledger.db",
         cwd: str = ".",
+        timeout: float = 30.0,
     ) -> None:
         self._server_command = server_command
         self._intent_id = intent_id
         self._ledger_path = Path(ledger_path)
         self._cwd = cwd
+        self._timeout = timeout
         self._process: subprocess.Popen[bytes] | None = None
         self._request_id = 0
-
-    # ----- MCP Transport -----
 
     def _call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Send a JSON-RPC tools/call request and return parsed result."""
@@ -94,9 +111,7 @@ class MCPFailSafeClient:
         self._process.stdin.write(json.dumps(request).encode() + b"\n")
         self._process.stdin.flush()
 
-        line = self._process.stdout.readline()
-        if not line:
-            raise MCPToolError(name, "No response from MCP server (EOF)")
+        line = _read_line(self._process, self._timeout)
 
         response = json.loads(line)
         if "error" in response:
@@ -109,16 +124,12 @@ class MCPFailSafeClient:
             return json.loads(content[0]["text"])
         return result
 
-    # ----- Sentinel Audit (read) -----
-
     def _audit_file(self, file_path: str, intent_id: str) -> dict[str, Any]:
         """Call sentinel_audit_file MCP tool. Returns raw SentinelVerdict dict."""
         return self._call_tool(
             "sentinel_audit_file",
             {"path": file_path, "intent_id": intent_id},
         )
-
-    # ----- Ledger Logging (write, fire-and-forget) -----
 
     def _log_decision(
         self, decision: str, rationale: str, risk_grade: str, intent_id: str,
@@ -136,8 +147,6 @@ class MCPFailSafeClient:
             )
         except Exception as exc:
             logger.warning("Ledger log failed (non-critical): %s", exc)
-
-    # ----- FailSafeClient Protocol -----
 
     def evaluate(self, request: DecisionRequest) -> DecisionResponse:
         """Evaluate a governance decision via the FailSafe MCP server."""
@@ -173,8 +182,6 @@ class MCPFailSafeClient:
         """Read Shadow Genome from SQLite ledger (no MCP tool for this)."""
         return query_shadow_genome(self._ledger_path, agent_did)
 
-    # ----- Connection Lifecycle -----
-
     def _ensure_connected(self) -> None:
         """Spawn subprocess if not running. Send MCP initialize handshake."""
         if self._process is not None and self._process.poll() is None:
@@ -191,10 +198,14 @@ class MCPFailSafeClient:
         except OSError as exc:
             raise MCPToolError("initialize", f"Failed to start MCP server: {exc}") from exc
 
+        self._send_initialize_handshake()
+
+    def _send_initialize_handshake(self) -> None:
+        """Send MCP initialize request and validate response."""
+        assert self._process is not None
         assert self._process.stdin is not None
         assert self._process.stdout is not None
 
-        # Send MCP initialize handshake
         self._request_id += 1
         init_request = {
             "jsonrpc": "2.0",
@@ -203,15 +214,13 @@ class MCPFailSafeClient:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "agent-failsafe", "version": "0.1.0"},
+                "clientInfo": {"name": "agent-failsafe", "version": "0.3.0"},
             },
         }
         self._process.stdin.write(json.dumps(init_request).encode() + b"\n")
         self._process.stdin.flush()
 
-        line = self._process.stdout.readline()
-        if not line:
-            raise MCPToolError("initialize", "MCP server did not respond to initialize")
+        line = _read_line(self._process, self._timeout)
 
         response = json.loads(line)
         if "error" in response:

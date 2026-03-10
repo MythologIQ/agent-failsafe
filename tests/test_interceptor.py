@@ -162,3 +162,53 @@ class TestFailSafeInterceptor:
 
         interceptor.intercept(MockToolCallRequest(agent_id=""))
         assert client.last_request.agent_did == "did:myth:scrivener:fallback"
+
+
+class TestOnDecisionCallback:
+    def test_on_decision_called_on_allow(self):
+        """Callback receives (request, response) when tool call is allowed."""
+        captured = []
+        client = MockFailSafeClient(DecisionResponse(allowed=True))
+        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp: captured.append((req, resp)))
+
+        interceptor.intercept(MockToolCallRequest(tool_name="read_file"))
+        assert len(captured) == 1
+        assert isinstance(captured[0][0], DecisionRequest)
+        assert captured[0][1].allowed is True
+
+    def test_on_decision_called_on_block(self):
+        """Callback receives (request, response) when tool call is blocked."""
+        captured = []
+        client = MockFailSafeClient(DecisionResponse(
+            allowed=False, risk_grade=RiskGrade.L3, verdict=VerdictDecision.BLOCK,
+        ))
+        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp: captured.append((req, resp)))
+
+        interceptor.intercept(MockToolCallRequest(tool_name="write_file"))
+        assert len(captured) == 1
+        assert captured[0][1].allowed is False
+
+    def test_on_decision_not_called_on_fail_open(self):
+        """Callback is NOT invoked when client.evaluate raises (fail-open path)."""
+        captured = []
+
+        class FailingClient:
+            def evaluate(self, req):
+                raise ConnectionError("unreachable")
+            def classify_risk(self, *a):
+                return RiskGrade.L1
+            def get_shadow_genome(self, *a):
+                return []
+
+        interceptor = FailSafeInterceptor(client=FailingClient(), on_decision=lambda req, resp: captured.append((req, resp)))
+        interceptor.intercept(MockToolCallRequest())
+        assert len(captured) == 0
+
+    def test_on_decision_none_by_default(self):
+        """No error when on_decision is None (default)."""
+        client = MockFailSafeClient(DecisionResponse(allowed=True))
+        interceptor = FailSafeInterceptor(client=client)
+
+        assert interceptor.on_decision is None
+        result = interceptor.intercept(MockToolCallRequest())
+        assert result.allowed is True

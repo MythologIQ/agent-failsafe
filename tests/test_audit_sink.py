@@ -88,3 +88,17 @@ class TestFailSafeAuditSink:
         sink = FailSafeAuditSink(ledger_path=deep_path)
         sink.write(MockAuditEntry())
         assert deep_path.exists()
+
+    def test_default_hmac_key_warns(self, tmp_path, caplog):
+        """Default dev HMAC key logs a warning at construction."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            FailSafeAuditSink(ledger_path=tmp_path / "warn.db")
+        assert any("default dev HMAC key" in r.message for r in caplog.records)
+
+    def test_custom_hmac_key_no_warning(self, tmp_path, caplog):
+        """Custom HMAC key does not trigger the warning."""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            FailSafeAuditSink(ledger_path=tmp_path / "no_warn.db", hmac_key=b"prod-key")
+        assert not any("default dev HMAC key" in r.message for r in caplog.records)

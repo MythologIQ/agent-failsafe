@@ -9,124 +9,151 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from agent_os.integrations.base import BaseIntegration, GovernanceEventType
+from agent_os.integrations.registry import register_adapter
+
+from .audit_sink import FailSafeAuditSink, decision_to_audit_entry
+from .escalation import FailSafeApprovalBackend
 from .interceptor import FailSafeInterceptor
-from .types import DecisionRequest, FailSafeClient
+from .pipeline import GovernancePipeline, PipelineResult, PipelineStage
+from .sli import FailSafeComplianceSLI
+from .types import DecisionRequest, DecisionResponse, FailSafeClient, VerdictDecision
 
 logger = logging.getLogger(__name__)
 
-# Lazy imports — agent-os is an optional dependency
-_BaseIntegration = None
-_GovernanceEventType = None
-_register_adapter = None
+
+class _GovernedAgent:
+    """Thin proxy that wraps an agent with governance checks."""
+
+    def __init__(self, original: Any, ctx: Any, kernel: Any) -> None:
+        self._original = original
+        self._ctx = ctx
+        self._kernel = kernel
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._original, name)
 
 
-def _ensure_imports() -> None:
-    global _BaseIntegration, _GovernanceEventType, _register_adapter
-    if _BaseIntegration is None:
-        from agent_os.integrations.base import BaseIntegration, GovernanceEventType
-        from agent_os.integrations.registry import register_adapter
-        _BaseIntegration = BaseIntegration
-        _GovernanceEventType = GovernanceEventType
-        _register_adapter = register_adapter
+def _evaluate_action(
+    client: FailSafeClient,
+    agent_did: str,
+    action: str,
+    emit_fn: Any,
+    **kw: Any,
+) -> bool:
+    """Evaluate a governance action and emit blocked event if denied."""
+    req = DecisionRequest(action=action, agent_did=agent_did, **kw)
+    response = client.evaluate(req)
+    if not response.allowed:
+        emit_fn(GovernanceEventType.TOOL_CALL_BLOCKED, {
+            "agent_id": agent_did,
+            "action": action,
+            "risk_grade": response.risk_grade.value,
+            "reason": response.reason,
+        })
+    return response.allowed
 
 
-def create_failsafe_kernel(client: FailSafeClient, **kwargs: Any) -> Any:
-    """Factory function to create a FailSafeKernel.
+@register_adapter("failsafe")
+class FailSafeKernel(BaseIntegration):
+    """Agent OS integration adapter for FailSafe governance.
 
-    This defers the import of BaseIntegration until runtime so the package
-    can be imported without agent-os-kernel installed.
-
-    Args:
-        client: A FailSafeClient implementation.
-        **kwargs: Passed to the FailSafeKernel constructor.
-
-    Returns:
-        A FailSafeKernel instance (BaseIntegration subclass).
+    Wraps agents with FailSafe governance enforcement via the
+    BaseIntegration lifecycle (pre_execute / post_execute).
     """
-    _ensure_imports()
 
-    class FailSafeKernel(_BaseIntegration):
-        """Agent OS integration adapter for FailSafe governance.
+    def __init__(
+        self,
+        client: FailSafeClient,
+        default_agent_did: str = "did:myth:scrivener:unknown",
+        block_on_l3: bool = True,
+        sli: FailSafeComplianceSLI | None = None,
+        audit_sink: FailSafeAuditSink | None = None,
+        approval_backend: FailSafeApprovalBackend | None = None,
+        pipeline: GovernancePipeline | None = None,
+        webhook_notifier: Any | None = None,
+        **kw: Any,
+    ) -> None:
+        super().__init__(**kw)
+        self.fs_client = client
+        self.pipeline = pipeline
+        self.sli = sli
+        self.audit_sink = audit_sink
+        self.approval_backend = approval_backend
+        self.webhook_notifier = webhook_notifier
+        self.interceptor = FailSafeInterceptor(
+            client=client,
+            default_agent_did=default_agent_did,
+            block_on_l3=block_on_l3,
+            on_decision=self._on_decision if self._has_backends else None,
+        )
+        self._wrapped_agents: dict[int, Any] = {}
 
-        Wraps agents with FailSafe governance enforcement via the
-        BaseIntegration lifecycle (pre_execute / post_execute).
-        """
+    @property
+    def _has_backends(self) -> bool:
+        """Check if any backend is configured."""
+        return any((self.sli, self.audit_sink, self.approval_backend, self.webhook_notifier))
 
-        def __init__(
-            self,
-            fs_client: FailSafeClient,
-            default_agent_did: str = "did:myth:scrivener:unknown",
-            block_on_l3: bool = True,
-            **kw: Any,
-        ) -> None:
-            super().__init__(**kw)
-            self.fs_client = fs_client
-            self.interceptor = FailSafeInterceptor(
-                client=fs_client,
-                default_agent_did=default_agent_did,
-                block_on_l3=block_on_l3,
-            )
-            self._wrapped_agents: dict[int, Any] = {}
+    def _on_decision(self, request: DecisionRequest, response: DecisionResponse) -> None:
+        """Dispatch a governance decision to configured backends."""
+        if self.sli is not None:
+            self.sli.record_decision(response)
+        if self.audit_sink is not None:
+            entry = decision_to_audit_entry(request, response)
+            self.audit_sink.write(entry)
+        if self.approval_backend is not None:
+            if response.verdict == VerdictDecision.ESCALATE:
+                self.approval_backend.submit(request)
+        if self.webhook_notifier is not None:
+            self._emit_webhook(request, response)
 
-        def wrap(self, agent: Any) -> Any:
-            """Wrap an agent with FailSafe governance.
+    def _emit_webhook(self, request: DecisionRequest, response: DecisionResponse) -> None:
+        """Translate decision to WebhookEvent and send via notifier."""
+        from .webhook_events import decision_to_webhook_event
 
-            Returns a thin proxy that runs pre/post governance checks
-            around the agent's execution.
-            """
-            agent_id = getattr(agent, "agent_id", None) or str(id(agent))
-            ctx = self.create_context(agent_id)
+        event = decision_to_webhook_event(request, response)
+        try:
+            self.webhook_notifier.notify(event)
+        except Exception as exc:
+            logger.warning("Webhook notification failed: %s", exc)
 
-            self._wrapped_agents[id(agent)] = agent
-            self.emit(_GovernanceEventType.POLICY_CHECK, {
-                "agent_id": agent_id,
-                "phase": "wrap",
-                "adapter": "failsafe",
-            })
+    def wrap(self, agent: Any) -> Any:
+        """Wrap an agent with FailSafe governance."""
+        agent_id = getattr(agent, "agent_id", None) or str(id(agent))
+        ctx = self.create_context(agent_id)
 
-            logger.info("FailSafe governance applied to agent %s", agent_id)
-            return _GovernedAgent(agent, ctx, self)
+        self._wrapped_agents[id(agent)] = agent
+        self.emit(GovernanceEventType.POLICY_CHECK, {
+            "agent_id": agent_id,
+            "phase": "wrap",
+            "adapter": "failsafe",
+        })
 
-        def unwrap(self, governed_agent: Any) -> Any:
-            """Remove FailSafe governance wrapper."""
-            if isinstance(governed_agent, _GovernedAgent):
-                return governed_agent._original
-            return governed_agent
+        logger.info("FailSafe governance applied to agent %s", agent_id)
+        return _GovernedAgent(agent, ctx, self)
 
-        def evaluate(self, agent_did: str, action: str, **kw: Any) -> bool:
-            """Direct governance evaluation without the interceptor chain.
+    def unwrap(self, governed_agent: Any) -> Any:
+        """Remove FailSafe governance wrapper."""
+        if isinstance(governed_agent, _GovernedAgent):
+            return governed_agent._original
+        return governed_agent
 
-            Returns True if the action is allowed.
-            """
-            req = DecisionRequest(action=action, agent_did=agent_did, **kw)
-            response = self.fs_client.evaluate(req)
+    def evaluate(self, agent_did: str, action: str, **kw: Any) -> bool:
+        """Direct governance evaluation. Returns True if allowed."""
+        return _evaluate_action(self.fs_client, agent_did, action, self.emit, **kw)
 
-            if not response.allowed:
-                self.emit(_GovernanceEventType.TOOL_CALL_BLOCKED, {
-                    "agent_id": agent_did,
-                    "action": action,
-                    "risk_grade": response.risk_grade.value,
-                    "reason": response.reason,
-                })
+    def pipeline_evaluate(self, request: DecisionRequest) -> PipelineResult:
+        """Run the full governance pipeline. Falls back to basic eval if no pipeline."""
+        if self.pipeline is not None:
+            return self.pipeline.evaluate(request)
+        response = self.fs_client.evaluate(request)
+        return PipelineResult(
+            stage=PipelineStage.AUDITED if response.allowed else PipelineStage.GOVERNANCE,
+            allowed=response.allowed,
+            governance=response,
+        )
 
-            return response.allowed
 
-    class _GovernedAgent:
-        """Thin proxy that wraps an agent with governance checks."""
-
-        def __init__(self, original: Any, ctx: Any, kernel: FailSafeKernel) -> None:
-            self._original = original
-            self._ctx = ctx
-            self._kernel = kernel
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._original, name)
-
-    # Register with the adapter registry
-    try:
-        _register_adapter("failsafe")(FailSafeKernel)
-    except (ValueError, TypeError):
-        # Already registered or registry not available
-        pass
-
+def create_failsafe_kernel(client: FailSafeClient, **kwargs: Any) -> FailSafeKernel:
+    """Convenience factory for creating a FailSafeKernel instance."""
     return FailSafeKernel(client, **kwargs)

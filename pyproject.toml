@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-failsafe"
-version = "0.2.0"
+version = "0.3.0"
 description = "FailSafe governance adapter for Microsoft Agent Governance Toolkit"
 readme = "README.md"
 license = "MIT"
@@ -30,15 +30,18 @@ dependencies = [
 agent-os = ["agent-os-kernel>=1.1.0"]
 agent-sre = ["agent-sre>=1.1.0"]
 agent-mesh = ["agentmesh-platform>=1.1.0"]
+agent-hypervisor = ["agent-hypervisor>=1.1.0"]
 full = [
     "agent-os-kernel>=1.1.0",
     "agent-sre>=1.1.0",
     "agentmesh-platform>=1.1.0",
+    "agent-hypervisor>=1.1.0",
 ]
 dev = [
     "agent-os-kernel>=1.1.0",
     "agent-sre>=1.1.0",
     "agentmesh-platform>=1.1.0",
+    "agent-hypervisor>=1.1.0",
     "pytest>=7.0",
     "ruff>=0.1.0",
 ]

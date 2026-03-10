@@ -7,11 +7,13 @@ FailSafe governance decisions on every tool call.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from .types import DecisionRequest, DecisionResponse, FailSafeClient, RiskGrade, VerdictDecision
 
 logger = logging.getLogger(__name__)
+
+DecisionCallback = Callable[["DecisionRequest", "DecisionResponse"], None]
 
 # Lazy imports — toolkit packages are optional dependencies
 _ToolCallRequest = None
@@ -24,6 +26,36 @@ def _ensure_imports() -> None:
         from agent_os.integrations.base import ToolCallRequest, ToolCallResult
         _ToolCallRequest = ToolCallRequest
         _ToolCallResult = ToolCallResult
+
+
+def _fail_open_result(exc: Exception) -> Any:
+    """Build a fail-open ToolCallResult when FailSafe is unavailable."""
+    return _ToolCallResult(
+        allowed=True,
+        reason=f"FailSafe unavailable ({exc}); fail-open policy applied",
+        audit_entry={"failsafe_error": str(exc), "fail_open": True},
+    )
+
+
+def _build_result(
+    response: DecisionResponse,
+    tool_name: str,
+    allowed: bool,
+    reason: str = "",
+) -> Any:
+    """Build a ToolCallResult from a FailSafe decision."""
+    return _ToolCallResult(
+        allowed=allowed,
+        reason=reason,
+        audit_entry={
+            "failsafe_allowed": response.allowed,
+            "failsafe_risk_grade": response.risk_grade.value,
+            "failsafe_verdict": response.verdict.value,
+            "failsafe_reason": response.reason,
+            "failsafe_nonce": response.nonce,
+            "tool_name": tool_name,
+        },
+    )
 
 
 class FailSafeInterceptor:
@@ -44,10 +76,12 @@ class FailSafeInterceptor:
         client: FailSafeClient,
         default_agent_did: str = "did:myth:scrivener:unknown",
         block_on_l3: bool = True,
+        on_decision: DecisionCallback | None = None,
     ) -> None:
         self.client = client
         self.default_agent_did = default_agent_did
         self.block_on_l3 = block_on_l3
+        self.on_decision = on_decision
         self._decision_count = 0
         self._block_count = 0
 
@@ -61,8 +95,6 @@ class FailSafeInterceptor:
         agent_did = getattr(request, "agent_id", "") or self.default_agent_did
         tool_name = getattr(request, "tool_name", "unknown")
         arguments = getattr(request, "arguments", {})
-
-        # Map tool call to a FailSafe governance action
         action = self._map_tool_to_action(tool_name)
 
         decision_req = DecisionRequest(
@@ -76,38 +108,25 @@ class FailSafeInterceptor:
             response = self.client.evaluate(decision_req)
         except Exception as exc:
             logger.error("FailSafe evaluation failed: %s", exc)
-            # Fail-open: allow the call but log the failure
             self._decision_count += 1
-            return _ToolCallResult(
-                allowed=True,
-                reason=f"FailSafe unavailable ({exc}); fail-open policy applied",
-                audit_entry={"failsafe_error": str(exc), "fail_open": True},
-            )
+            return _fail_open_result(exc)
 
         self._decision_count += 1
+        if self.on_decision is not None:
+            self.on_decision(decision_req, response)
 
         if not response.allowed:
             self._block_count += 1
-            return _ToolCallResult(
-                allowed=False,
-                reason=response.reason or f"Blocked by FailSafe (risk={response.risk_grade.value})",
-                audit_entry=self._audit_entry(response, tool_name),
-            )
+            reason = response.reason or f"Blocked by FailSafe (risk={response.risk_grade.value})"
+            return _build_result(response, tool_name, False, reason)
 
-        # L3 escalation: block if configured
         if response.risk_grade == RiskGrade.L3 and self.block_on_l3:
             if response.verdict == VerdictDecision.ESCALATE:
                 self._block_count += 1
-                return _ToolCallResult(
-                    allowed=False,
-                    reason="L3 human approval required — action queued for review",
-                    audit_entry=self._audit_entry(response, tool_name),
-                )
+                return _build_result(response, tool_name, False,
+                                     "L3 human approval required — action queued for review")
 
-        return _ToolCallResult(
-            allowed=True,
-            audit_entry=self._audit_entry(response, tool_name),
-        )
+        return _build_result(response, tool_name, True)
 
     def _map_tool_to_action(self, tool_name: str) -> str:
         """Map a toolkit tool name to a FailSafe GovernanceAction string."""
@@ -119,19 +138,7 @@ class FailSafeInterceptor:
             return "file.write"
         if lower in delete_tools or "delete" in lower:
             return "file.delete"
-        # Default: treat as a checkpoint action for auditing
         return "checkpoint.create"
-
-    def _audit_entry(self, response: DecisionResponse, tool_name: str) -> dict:
-        """Build an audit entry dict from a FailSafe decision."""
-        return {
-            "failsafe_allowed": response.allowed,
-            "failsafe_risk_grade": response.risk_grade.value,
-            "failsafe_verdict": response.verdict.value,
-            "failsafe_reason": response.reason,
-            "failsafe_nonce": response.nonce,
-            "tool_name": tool_name,
-        }
 
     @property
     def stats(self) -> dict:

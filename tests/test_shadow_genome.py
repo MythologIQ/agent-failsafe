@@ -181,3 +181,18 @@ class TestGetConstraintsForAgent:
     def test_empty_store_returns_empty(self) -> None:
         store = InMemoryShadowGenomeStore()
         assert get_constraints_for_agent(store, "did:mesh:z") == []
+
+
+class TestDequeEviction:
+    def test_deque_auto_evicts(self) -> None:
+        """deque(maxlen=N) auto-evicts oldest entries."""
+        from collections import deque
+        store = InMemoryShadowGenomeStore(max_entries=3)
+        assert isinstance(store._entries, deque)
+
+        for i in range(5):
+            store.record(_entry(constraint=f"c{i}"))
+
+        assert len(store._entries) == 3
+        constraints = [e.negative_constraint for e in store._entries]
+        assert constraints == ["c2", "c3", "c4"]  # oldest evicted

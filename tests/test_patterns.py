@@ -166,3 +166,15 @@ class TestClassifyRisk:
 
     def test_l1_from_clean_text(self) -> None:
         assert classify_risk("/readme.txt") == RiskGrade.L1
+
+
+class TestCompiledCache:
+    def test_cached_defaults_match_uncached(self) -> None:
+        """Precompiled cache produces identical results to on-demand compilation."""
+        content = "password = 'secret123'\nos.system('rm -rf /')\nclean line\n"
+        cached_result = match_content(content)  # uses _COMPILED_DEFAULTS
+        uncached_result = match_content(content, patterns=DEFAULT_PATTERNS)
+        assert len(cached_result) == len(uncached_result)
+        for c, u in zip(cached_result, uncached_result):
+            assert c.pattern.id == u.pattern.id
+            assert c.line_number == u.line_number

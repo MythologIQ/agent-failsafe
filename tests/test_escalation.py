@@ -89,3 +89,18 @@ class TestFailSafeApprovalBackend:
 
         pending = backend.list_pending()
         assert len(pending) == 1
+
+    def test_max_requests_eviction(self):
+        """Oldest entries evicted when max_requests exceeded."""
+        client = MockClient()
+        backend = FailSafeApprovalBackend(client=client, max_requests=3)
+
+        for i in range(5):
+            backend.submit(MockEscalationRequest(request_id=f"req_{i}"))
+
+        assert len(backend._requests) == 3
+        # Oldest (req_0, req_1) should be evicted
+        assert "req_0" not in backend._requests
+        assert "req_1" not in backend._requests
+        # Newest should remain
+        assert "req_4" in backend._requests

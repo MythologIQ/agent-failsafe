@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_failsafe.mcp_client import MCPFailSafeClient, MCPToolError, _verdict_to_response
+from agent_failsafe.mcp_client import MCPFailSafeClient, MCPToolError, _read_line, _verdict_to_response
 from agent_failsafe.types import (
     DecisionRequest,
     RiskGrade,
@@ -277,3 +277,23 @@ class TestMCPFailSafeClient:
         err = MCPToolError("sentinel_audit_file", "timeout")
         assert "sentinel_audit_file" in str(err)
         assert "timeout" in str(err)
+
+    def test_read_line_timeout_raises(self):
+        """_read_line raises MCPToolError when server doesn't respond."""
+        mock_proc = MagicMock(spec=subprocess.Popen)
+        mock_proc.stdout = MagicMock()
+        mock_proc.stdout.readline = MagicMock(return_value=b"")
+        mock_proc.kill = MagicMock()
+
+        with pytest.raises(MCPToolError, match="EOF or killed by timeout"):
+            _read_line(mock_proc, timeout=1.0)
+
+    def test_read_line_success(self):
+        """_read_line returns data when server responds."""
+        mock_proc = MagicMock(spec=subprocess.Popen)
+        mock_proc.stdout = MagicMock()
+        mock_proc.stdout.readline = MagicMock(return_value=b'{"ok": true}\n')
+        mock_proc.kill = MagicMock()
+
+        result = _read_line(mock_proc, timeout=5.0)
+        assert result == b'{"ok": true}\n'

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from typing import Any
 
 from .types import DecisionResponse, VerdictDecision
@@ -52,11 +53,16 @@ class FailSafeComplianceSLI:
         window: Time window for aggregation. Default "24h".
     """
 
+    _WINDOW_MAX_ENTRIES: dict[str, int] = {
+        "1h": 5_000, "6h": 30_000, "24h": 100_000, "7d": 500_000, "30d": 1_000_000,
+    }
+
     def __init__(self, target: float = 0.95, window: str = "24h") -> None:
         self.name = "failsafe_compliance"
         self.target = target
         self.window = window
-        self._decisions: list[dict[str, Any]] = []
+        maxlen = self._WINDOW_MAX_ENTRIES.get(window, 100_000)
+        self._decisions: deque[dict[str, Any]] = deque(maxlen=maxlen)
 
     def record_decision(self, response: DecisionResponse) -> None:
         """Record a governance decision for SLI tracking."""

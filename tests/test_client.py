@@ -108,3 +108,16 @@ class TestLocalFailSafeClient:
         client = LocalFailSafeClient(config_dir=config_dir, ledger_path=ledger_path)
         entries = client.get_shadow_genome()
         assert entries == []
+
+    def test_table_ensured_flag(self, tmp_failsafe):
+        """_table_ensured prevents repeated CREATE TABLE calls."""
+        config_dir, ledger_path = tmp_failsafe
+        client = LocalFailSafeClient(config_dir=config_dir, ledger_path=ledger_path)
+        assert client._table_ensured is False
+
+        client.evaluate(DecisionRequest(action="file.write", agent_did="did:myth:scrivener:abc"))
+        assert client._table_ensured is True
+
+        # Second call should skip CREATE TABLE (flag stays True)
+        client.evaluate(DecisionRequest(action="file.read", agent_did="did:myth:scrivener:abc"))
+        assert client._table_ensured is True

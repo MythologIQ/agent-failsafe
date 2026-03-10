@@ -1,9 +1,4 @@
-"""AuditSink implementation that writes to the FailSafe ledger.
-
-Bridges the Agent Mesh audit system to FailSafe's Merkle-chained
-SQLite ledger, translating AuditEntry instances to FailSafe ledger
-records with HMAC signatures.
-"""
+"""AuditSink that writes to the FailSafe Merkle-chained SQLite ledger."""
 
 from __future__ import annotations
 
@@ -14,9 +9,65 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
+from .types import DecisionRequest, DecisionResponse
+
 logger = logging.getLogger(__name__)
+
+
+def decision_to_audit_entry(
+    request: DecisionRequest,
+    response: DecisionResponse,
+) -> SimpleNamespace:
+    """Map a governance decision to an AuditEntry-compatible object."""
+    return SimpleNamespace(
+        entry_id=response.nonce or "",
+        timestamp=response.timestamp,
+        event_type="governance_eval",
+        agent_did=request.agent_did,
+        action=request.action,
+        resource=request.artifact_path or None,
+        target_did=None,
+        data={"verdict": response.verdict.value, "reason": response.reason},
+        outcome="allowed" if response.allowed else "blocked",
+        policy_decision=response.verdict.value,
+        matched_rule=None,
+        trace_id=None,
+        session_id=None,
+    )
+
+
+def _extract_record(entry: Any) -> dict[str, Any]:
+    """Extract a record dict from an AuditEntry-like object."""
+    return {
+        "entry_id": getattr(entry, "entry_id", ""),
+        "timestamp": str(getattr(entry, "timestamp", "")),
+        "event_type": getattr(entry, "event_type", ""),
+        "agent_did": getattr(entry, "agent_did", ""),
+        "action": getattr(entry, "action", ""),
+        "resource": getattr(entry, "resource", None),
+        "target_did": getattr(entry, "target_did", None),
+        "data": json.dumps(getattr(entry, "data", {})),
+        "outcome": getattr(entry, "outcome", "success"),
+        "policy_decision": getattr(entry, "policy_decision", None),
+        "matched_rule": getattr(entry, "matched_rule", None),
+        "trace_id": getattr(entry, "trace_id", None),
+        "session_id": getattr(entry, "session_id", None),
+    }
+
+
+def _sign_record(
+    record: dict[str, Any],
+    prev_hash: str,
+    hmac_key: bytes,
+) -> tuple[str, str]:
+    """Compute entry hash and HMAC signature. Returns (hash, signature)."""
+    content = FailSafeAuditSink._content_for_hash(record)
+    entry_hash = hashlib.sha256(f"{prev_hash}:{content}".encode()).hexdigest()
+    signature = hmac.new(hmac_key, entry_hash.encode(), hashlib.sha256).hexdigest()
+    return entry_hash, signature
 
 
 class FailSafeAuditSink:
@@ -38,6 +89,8 @@ class FailSafeAuditSink:
     ) -> None:
         self.ledger_path = Path(ledger_path)
         self.hmac_key = hmac_key
+        if hmac_key == b"failsafe-dev-key":
+            logger.warning("FailSafeAuditSink: using default dev HMAC key — set hmac_key for production")
         self._lock = threading.Lock()
         self._prev_hash = "0" * 64
         self._entry_count = 0
@@ -91,7 +144,6 @@ class FailSafeAuditSink:
                         f"got {row['entry_hash'][:16]}..."
                     )
 
-                # Verify HMAC signature
                 expected_sig = hmac.new(
                     self.hmac_key, expected_hash.encode(), hashlib.sha256
                 ).hexdigest()
@@ -141,7 +193,6 @@ class FailSafeAuditSink:
             """)
             conn.commit()
 
-            # Load the latest hash for chain continuity
             cursor = conn.execute(
                 "SELECT entry_hash FROM audit_entries ORDER BY id DESC LIMIT 1"
             )
@@ -155,29 +206,8 @@ class FailSafeAuditSink:
 
     def _write_entry(self, entry: Any) -> None:
         """Write a single entry (must hold _lock)."""
-        record = {
-            "entry_id": getattr(entry, "entry_id", ""),
-            "timestamp": str(getattr(entry, "timestamp", "")),
-            "event_type": getattr(entry, "event_type", ""),
-            "agent_did": getattr(entry, "agent_did", ""),
-            "action": getattr(entry, "action", ""),
-            "resource": getattr(entry, "resource", None),
-            "target_did": getattr(entry, "target_did", None),
-            "data": json.dumps(getattr(entry, "data", {})),
-            "outcome": getattr(entry, "outcome", "success"),
-            "policy_decision": getattr(entry, "policy_decision", None),
-            "matched_rule": getattr(entry, "matched_rule", None),
-            "trace_id": getattr(entry, "trace_id", None),
-            "session_id": getattr(entry, "session_id", None),
-        }
-
-        content = self._content_for_hash(record)
-        entry_hash = hashlib.sha256(
-            f"{self._prev_hash}:{content}".encode()
-        ).hexdigest()
-        signature = hmac.new(
-            self.hmac_key, entry_hash.encode(), hashlib.sha256
-        ).hexdigest()
+        record = _extract_record(entry)
+        entry_hash, signature = _sign_record(record, self._prev_hash, self.hmac_key)
 
         record["entry_hash"] = entry_hash
         record["prev_hash"] = self._prev_hash

@@ -24,11 +24,13 @@ from .types import (
 from .client import LocalFailSafeClient, query_shadow_genome
 from .mcp_client import MCPFailSafeClient, MCPToolError
 from .ring_adapter import FailSafeRingAdapter
+from .integration import FailSafeKernel, create_failsafe_kernel
+from .pipeline import GovernancePipeline, PipelineResult, PipelineStage, create_pipeline
 from .interceptor import FailSafeInterceptor
 from .trust_mapper import FailSafeTrustMapper
 from .policy_provider import ShadowGenomePolicyProvider
 from .sli import FailSafeComplianceSLI, create_sre_sli, decision_to_signal
-from .audit_sink import FailSafeAuditSink
+from .audit_sink import FailSafeAuditSink, decision_to_audit_entry
 from .escalation import FailSafeApprovalBackend
 from .shadow_genome import (
     RemediationStatus,
@@ -53,6 +55,8 @@ from .trust import (
     is_probationary,
     calculate_influence_weight,
 )
+from .trust_validator import FailSafeTrustValidator
+from .webhook_events import decision_to_webhook_event, decisions_to_webhook_events
 
 __version__ = "0.3.0"
 
@@ -77,6 +81,14 @@ __all__ = [
     "MCPToolError",
     # Ring adapter (→ hypervisor ExecutionRing)
     "FailSafeRingAdapter",
+    # Integration (BaseIntegration + AdapterRegistry)
+    "FailSafeKernel",
+    "create_failsafe_kernel",
+    # Pipeline (full lifecycle orchestration)
+    "GovernancePipeline",
+    "PipelineResult",
+    "PipelineStage",
+    "create_pipeline",
     # Interceptor (ToolCallInterceptor)
     "FailSafeInterceptor",
     # Trust mapping (did:myth ↔ did:mesh)
@@ -89,6 +101,7 @@ __all__ = [
     "decision_to_signal",
     # Audit sink (→ FailSafe ledger)
     "FailSafeAuditSink",
+    "decision_to_audit_entry",
     # Escalation (→ FailSafe L3)
     "FailSafeApprovalBackend",
     # Shadow Genome (failure DNA)
@@ -111,4 +124,9 @@ __all__ = [
     "apply_outcome",
     "is_probationary",
     "calculate_influence_weight",
+    # Trust Validator (→ control plane ValidatorInterface)
+    "FailSafeTrustValidator",
+    # Webhook Events (→ WebhookNotifier)
+    "decision_to_webhook_event",
+    "decisions_to_webhook_events",
 ]

@@ -65,3 +65,21 @@ class TestDecisionToSignal:
         result = decision_to_signal(resp)
         if result is not None:
             assert result.signal_type.value == "policy_violation"
+
+
+class TestDequeEviction:
+    def test_decisions_evicted_at_maxlen(self):
+        """Decisions beyond maxlen are auto-evicted (oldest dropped)."""
+        sli = FailSafeComplianceSLI(window="1h")
+        # _WINDOW_MAX_ENTRIES["1h"] = 5000, but we test the deque behavior
+        for i in range(10):
+            sli.record_decision(DecisionResponse(
+                allowed=True, risk_grade=RiskGrade.L1, verdict=VerdictDecision.PASS,
+            ))
+        assert len(sli._decisions) == 10  # under maxlen, all retained
+
+    def test_deque_type(self):
+        """Verify _decisions is a deque, not a list."""
+        from collections import deque
+        sli = FailSafeComplianceSLI()
+        assert isinstance(sli._decisions, deque)

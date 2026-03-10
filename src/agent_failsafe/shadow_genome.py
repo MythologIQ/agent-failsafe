@@ -7,6 +7,7 @@ mistakes across sessions.  Thread-safe in-memory store with FIFO eviction.
 from __future__ import annotations
 
 import threading
+from collections import deque
 from enum import Enum
 from typing import Protocol, Sequence
 
@@ -64,15 +65,12 @@ class InMemoryShadowGenomeStore:
     """
 
     def __init__(self, max_entries: int = 10_000) -> None:
-        self._entries: list[ShadowGenomeEntry] = []
+        self._entries: deque[ShadowGenomeEntry] = deque(maxlen=max_entries)
         self._lock = threading.Lock()
-        self._max_entries = max_entries
 
     def record(self, entry: ShadowGenomeEntry) -> None:
         """Append an entry, evicting the oldest if at capacity."""
         with self._lock:
-            if len(self._entries) >= self._max_entries:
-                self._entries.pop(0)
             self._entries.append(entry)
 
     def query(
