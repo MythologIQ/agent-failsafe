@@ -83,3 +83,20 @@ class TestDequeEviction:
         from collections import deque
         sli = FailSafeComplianceSLI()
         assert isinstance(sli._decisions, deque)
+
+
+class TestSignalReasonTruncation:
+    def test_signal_reason_truncated(self):
+        """Reason longer than 200 chars is truncated in signal message."""
+        long_reason = "x" * 500
+        resp = DecisionResponse(
+            allowed=False,
+            risk_grade=RiskGrade.L3,
+            verdict=VerdictDecision.BLOCK,
+            reason=long_reason,
+        )
+        result = decision_to_signal(resp)
+        if result is not None:
+            # The message should not contain 500 x's
+            assert len(result.message) < 500
+            assert "x" * 201 not in result.message

@@ -97,9 +97,9 @@ class FailSafeApprovalBackend:
                     "status": "pending",
                     "submitted_at": datetime.now(timezone.utc),
                 }
-            if len(self._requests) > self._max_requests:
-                oldest_key = next(iter(self._requests))
-                del self._requests[oldest_key]
+                while len(self._requests) > self._max_requests:
+                    oldest_key = next(iter(self._requests))
+                    del self._requests[oldest_key]
             logger.info("L3 escalation submitted: %s (risk=%s)", request_id, response.risk_grade.value)
         except Exception as exc:
             logger.error("Failed to submit L3 escalation: %s", exc)

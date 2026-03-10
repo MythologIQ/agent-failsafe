@@ -118,7 +118,7 @@ class LocalFailSafeClient:
         self.ledger_path = Path(ledger_path)
         self._extra_triggers: frozenset[str] = frozenset()
         self._policies: dict[str, Any] = {}
-        self._table_ensured = False
+        self._ledger_conn: sqlite3.Connection | None = None
         self._load_policies()
 
     def _load_policies(self) -> None:
@@ -198,34 +198,42 @@ class LocalFailSafeClient:
             return VerdictDecision.WARN
         return VerdictDecision.PASS
 
+    def _ensure_ledger_conn(self) -> None:
+        """Open persistent ledger connection lazily on first write."""
+        if self._ledger_conn is not None:
+            return
+        if not self.ledger_path.parent.exists():
+            self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ledger_conn = sqlite3.connect(str(self.ledger_path))
+        self._ledger_conn.execute("PRAGMA journal_mode=WAL")
+        self._ledger_conn.execute("PRAGMA busy_timeout=5000")
+        self._ledger_conn.execute(_EVALUATIONS_DDL)
+
     def _log_to_ledger(self, request: DecisionRequest, response: DecisionResponse) -> None:
         """Append an evaluation record to the SQLite ledger."""
-        if not self.ledger_path.parent.exists():
-            return
-
         try:
-            conn = sqlite3.connect(str(self.ledger_path))
-            try:
-                if not self._table_ensured:
-                    conn.execute(_EVALUATIONS_DDL)
-                    self._table_ensured = True
-                conn.execute(
-                    """INSERT INTO evaluations
-                       (timestamp, action, agent_did, risk_grade, verdict, allowed, nonce, reason)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        response.timestamp,
-                        request.action,
-                        request.agent_did,
-                        response.risk_grade.value,
-                        response.verdict.value,
-                        int(response.allowed),
-                        response.nonce,
-                        response.reason,
-                    ),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+            self._ensure_ledger_conn()
+            self._ledger_conn.execute(
+                """INSERT INTO evaluations
+                   (timestamp, action, agent_did, risk_grade, verdict, allowed, nonce, reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    response.timestamp,
+                    request.action,
+                    request.agent_did,
+                    response.risk_grade.value,
+                    response.verdict.value,
+                    int(response.allowed),
+                    response.nonce,
+                    response.reason,
+                ),
+            )
+            self._ledger_conn.commit()
         except Exception as exc:
             logger.debug("Ledger write failed (non-critical): %s", exc)
+
+    def close(self) -> None:
+        """Release the persistent ledger connection."""
+        if self._ledger_conn is not None:
+            self._ledger_conn.close()
+            self._ledger_conn = None

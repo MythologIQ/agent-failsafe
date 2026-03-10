@@ -1,5 +1,6 @@
 """Tests for FailSafeKernel integration and AdapterRegistry."""
 
+import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -143,7 +144,7 @@ def test_decision_to_audit_entry_mapping():
     assert entry.event_type == "governance_eval"
     assert entry.agent_did == "did:myth:scrivener:abc"
     assert entry.action == "file.write"
-    assert entry.resource == "/src/main.py"
+    assert entry.resource == os.path.normpath("/src/main.py")
     assert entry.outcome == "allowed"
     assert entry.policy_decision == "PASS"
     assert entry.data == {"verdict": "PASS", "reason": "OK"}

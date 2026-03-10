@@ -30,7 +30,7 @@ from .interceptor import FailSafeInterceptor
 from .trust_mapper import FailSafeTrustMapper
 from .policy_provider import ShadowGenomePolicyProvider
 from .sli import FailSafeComplianceSLI, create_sre_sli, decision_to_signal
-from .audit_sink import FailSafeAuditSink, decision_to_audit_entry
+from .audit_sink import FailSafeAuditSink, decision_to_audit_entry, verify_audit_integrity
 from .escalation import FailSafeApprovalBackend
 from .shadow_genome import (
     RemediationStatus,
@@ -58,7 +58,7 @@ from .trust import (
 from .trust_validator import FailSafeTrustValidator
 from .webhook_events import decision_to_webhook_event, decisions_to_webhook_events
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # Types
@@ -102,6 +102,7 @@ __all__ = [
     # Audit sink (→ FailSafe ledger)
     "FailSafeAuditSink",
     "decision_to_audit_entry",
+    "verify_audit_integrity",
     # Escalation (→ FailSafe L3)
     "FailSafeApprovalBackend",
     # Shadow Genome (failure DNA)

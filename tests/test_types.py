@@ -59,8 +59,35 @@ class TestDecisionRequest:
             artifact_path="/src/main.py",
             payload={"lines": 42},
         )
-        assert req.artifact_path == "/src/main.py"
         assert req.payload["lines"] == 42
+
+    def test_empty_action_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="action must not be empty"):
+            DecisionRequest(action="", agent_did="did:myth:scrivener:abc")
+
+    def test_empty_agent_did_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="agent_did must not be empty"):
+            DecisionRequest(action="file.write", agent_did="")
+
+    def test_path_traversal_normalized(self):
+        req = DecisionRequest(
+            action="file.write",
+            agent_did="did:myth:scrivener:abc",
+            artifact_path="src/../secrets/key.pem",
+        )
+        assert ".." not in req.artifact_path
+
+    def test_valid_action_passes(self):
+        req = DecisionRequest(action="file.write", agent_did="did:myth:scrivener:abc")
+        assert req.action == "file.write"
+
+    def test_unknown_action_warns(self, caplog):
+        import logging
+        with caplog.at_level(logging.DEBUG):
+            DecisionRequest(action="custom.action", agent_did="did:myth:scrivener:abc")
+        assert "Unknown governance action" in caplog.text
 
 
 class TestDecisionResponse:

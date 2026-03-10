@@ -104,3 +104,27 @@ class TestFailSafeApprovalBackend:
         assert "req_1" not in backend._requests
         # Newest should remain
         assert "req_4" in backend._requests
+
+    def test_eviction_under_lock(self):
+        """Eviction happens atomically inside the lock."""
+        import threading
+
+        client = MockClient()
+        backend = FailSafeApprovalBackend(client=client, max_requests=5)
+        errors: list[str] = []
+
+        def submit_batch(start: int) -> None:
+            for i in range(start, start + 10):
+                try:
+                    backend.submit(MockEscalationRequest(request_id=f"t_{i}"))
+                except Exception as exc:
+                    errors.append(str(exc))
+
+        threads = [threading.Thread(target=submit_batch, args=(n * 10,)) for n in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert len(backend._requests) <= 5

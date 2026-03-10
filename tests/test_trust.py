@@ -130,3 +130,35 @@ class TestScoreToMeshTrust:
 
     def test_fractional(self) -> None:
         assert score_to_mesh_trust(0.35) == 350
+
+
+# ---------------------------------------------------------------------------
+# TestDiminishingReturns
+# ---------------------------------------------------------------------------
+
+
+class TestDiminishingReturns:
+    """Tests for consecutive_successes diminishing returns."""
+
+    def test_consecutive_zero_gives_full_delta(self) -> None:
+        """Backward compat: consecutive_successes=0 gives full delta."""
+        result = apply_outcome(0.5, allowed=True, risk_grade="L1", consecutive_successes=0)
+        assert result == pytest.approx(0.55)
+
+    def test_diminishing_returns_after_5_successes(self) -> None:
+        """After 5 consecutive successes, delta should be < 0.02."""
+        result = apply_outcome(0.5, allowed=True, risk_grade="L1", consecutive_successes=5)
+        delta = result - 0.5
+        assert delta < 0.02
+
+    def test_ibt_requires_more_successes(self) -> None:
+        """With diminishing returns, reaching IBT (0.8) from default (0.35) needs >15 successes."""
+        score = 0.35
+        for i in range(15):
+            score = apply_outcome(score, allowed=True, risk_grade="L1", consecutive_successes=i)
+        assert score < 0.8  # Still below IBT after 15
+
+    def test_failure_ignores_consecutive(self) -> None:
+        """Failure delta is unaffected by consecutive_successes."""
+        result = apply_outcome(0.5, allowed=False, risk_grade="L1", consecutive_successes=10)
+        assert result == pytest.approx(0.40)

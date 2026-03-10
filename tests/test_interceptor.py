@@ -212,3 +212,41 @@ class TestOnDecisionCallback:
         assert interceptor.on_decision is None
         result = interceptor.intercept(MockToolCallRequest())
         assert result.allowed is True
+
+
+class TestFailOpenFailClosed:
+    def test_fail_closed_raises_on_client_error(self):
+        """fail_open=False re-raises the exception."""
+        class FailingClient:
+            def evaluate(self, req):
+                raise ConnectionError("FailSafe unreachable")
+            def classify_risk(self, *a):
+                return RiskGrade.L1
+            def get_shadow_genome(self, *a):
+                return []
+
+        interceptor = FailSafeInterceptor(client=FailingClient(), fail_open=False)
+        with pytest.raises(ConnectionError, match="unreachable"):
+            interceptor.intercept(MockToolCallRequest())
+
+    def test_fail_open_result_no_exception_leak(self):
+        """Fail-open result contains generic message, no str(exc) in reason."""
+        class FailingClient:
+            def evaluate(self, req):
+                raise ConnectionError("SENSITIVE_INTERNAL_ERROR_DETAILS")
+            def classify_risk(self, *a):
+                return RiskGrade.L1
+            def get_shadow_genome(self, *a):
+                return []
+
+        interceptor = FailSafeInterceptor(client=FailingClient(), fail_open=True)
+        result = interceptor.intercept(MockToolCallRequest())
+        assert result.allowed is True
+        assert "SENSITIVE_INTERNAL_ERROR_DETAILS" not in result.reason
+        assert "fail-open" in result.reason.lower()
+
+    def test_fail_open_default_is_true(self):
+        """Default fail_open is True for backward compatibility."""
+        client = MockFailSafeClient()
+        interceptor = FailSafeInterceptor(client=client)
+        assert interceptor.fail_open is True

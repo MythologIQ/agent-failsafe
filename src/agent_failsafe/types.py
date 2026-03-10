@@ -6,11 +6,15 @@ to/from the Microsoft Agent Governance Toolkit extension points.
 
 from __future__ import annotations
 
+import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Protocol, runtime_checkable
+
+_types_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +115,9 @@ class PersonaType(Enum):
 # ---------------------------------------------------------------------------
 
 
+_GOVERNANCE_ACTIONS = frozenset(a.value for a in GovernanceAction)
+
+
 @dataclass
 class DecisionRequest:
     """Request for a governance evaluation (Python mirror of FailSafe DecisionRequest)."""
@@ -123,6 +130,18 @@ class DecisionRequest:
     payload: dict[str, Any] = field(default_factory=dict)
     nonce: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     workflow: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.action:
+            raise ValueError("action must not be empty")
+        if not self.agent_did:
+            raise ValueError("agent_did must not be empty")
+        if self.agent_did and not self.agent_did.startswith("did:"):
+            _types_logger.warning("agent_did does not start with 'did:' prefix: %s", self.agent_did)
+        if self.action not in _GOVERNANCE_ACTIONS:
+            _types_logger.debug("Unknown governance action: %s", self.action)
+        if self.artifact_path:
+            self.artifact_path = os.path.normpath(self.artifact_path)
 
 
 @dataclass

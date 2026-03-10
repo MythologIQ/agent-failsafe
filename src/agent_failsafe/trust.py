@@ -86,6 +86,7 @@ def apply_outcome(
     allowed: bool,
     risk_grade: str,
     config: TrustConfig = DEFAULT_TRUST_CONFIG,
+    consecutive_successes: int = 0,
 ) -> float:
     """Apply a governance outcome to produce an updated trust score.
 
@@ -94,12 +95,16 @@ def apply_outcome(
         allowed: Whether the action was allowed.
         risk_grade: The risk grade string (``"L1"``, ``"L2"``, or ``"L3"``).
         config: Trust configuration with delta values.
+        consecutive_successes: Number of consecutive successes before this
+            outcome.  Applies diminishing returns (0.8^n decay) to the
+            success delta, making rapid trust escalation harder.
 
     Returns:
         Updated trust score, clamped to [0.0, 1.0].
     """
     if allowed:
-        delta = config.success_delta
+        decay = 0.8 ** consecutive_successes
+        delta = config.success_delta * decay
     elif risk_grade == "L3":
         delta = config.violation_penalty
     else:

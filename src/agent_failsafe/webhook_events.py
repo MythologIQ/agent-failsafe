@@ -10,6 +10,7 @@ objects with identical fields.
 
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from typing import Any, Iterable
 
@@ -83,7 +84,7 @@ def _build_details(
         "reason": response.reason,
         "nonce": response.nonce,
         "agent_did": request.agent_did,
-        "artifact_path": request.artifact_path,
+        "artifact_path": os.path.basename(request.artifact_path) if request.artifact_path else "",
     }
 
 
