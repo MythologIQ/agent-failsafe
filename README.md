@@ -1,10 +1,42 @@
 # agent-failsafe
 
+[![PyPI](https://img.shields.io/pypi/v/agent-failsafe)](https://pypi.org/project/agent-failsafe/)
+[![Downloads](https://img.shields.io/pypi/dm/agent-failsafe)](https://pypi.org/project/agent-failsafe/)
+[![Python](https://img.shields.io/pypi/pyversions/agent-failsafe)](https://pypi.org/project/agent-failsafe/)
+[![License](https://img.shields.io/github/license/MythologIQ/agent-failsafe)](https://github.com/MythologIQ/agent-failsafe/blob/main/LICENSE)
+[![VS Code](https://img.shields.io/visual-studio-marketplace/v/MythologIQ.mythologiq-failsafe)](https://marketplace.visualstudio.com/items?itemName=MythologIQ.mythologiq-failsafe)
+
 FailSafe governance adapter for the [Microsoft Agent Governance Toolkit](https://github.com/microsoft/agent-governance-toolkit).
 
 Bridges FailSafe's governance engine (Shadow Genome, risk grading, trust dynamics) into the toolkit's extension points. FailSafe adapts to the toolkit, not the reverse.
 
-**Version**: 0.3.0 | **Python**: >= 3.11 | **License**: MIT
+Core runtime:
+https://github.com/MythologIQ/Failsafe
+
+```markdown
+Python adapter that connects the FailSafe runtime governance engine
+to the Microsoft Agent Governance Toolkit.
+
+
+• Adds runtime behavioral governance to the toolkit
+• Detects failure patterns such as tool recursion and reasoning collapse
+• Integrates through interceptors, validators, and policy providers
+• Install with pip install agent-failsafe
+```
+
+
+
+```ascii
+AI Agent
+   ↓
+Agent Governance Toolkit
+   ↓
+agent-failsafe adapter
+   ↓
+FailSafe runtime engine
+   ↓
+Tool execution
+```
 
 ## Installation
 
@@ -39,6 +71,15 @@ pip install agent-failsafe[full]
 | `decision_to_webhook_event` | `WebhookEvent` translation | `webhook_events.py` |
 
 ## Quick Start
+
+Basic interceptor example
+
+```python
+from agent_failsafe import FailSafeInterceptor
+
+interceptor = FailSafeInterceptor()
+result = interceptor.intercept(request)
+```
 
 ```python
 from agent_failsafe import LocalFailSafeClient, GovernancePipeline, DecisionRequest
