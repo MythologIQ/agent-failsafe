@@ -17,34 +17,6 @@ agent-failsafe is a Python adapter that connects the FailSafe runtime governance
 
 Core runtime: [https://github.com/MythologIQ/Failsafe](https://github.com/MythologIQ/Failsafe)
 
-Core runtime:
-https://github.com/MythologIQ/Failsafe
-
-```markdown
-Python adapter that connects the FailSafe runtime governance engine
-to the Microsoft Agent Governance Toolkit.
-
-
-• Adds runtime behavioral governance to the toolkit
-• Detects failure patterns such as tool recursion and reasoning collapse
-• Integrates through interceptors, validators, and policy providers
-• Install with pip install agent-failsafe
-```
-
-
-
-```ascii
-AI Agent
-   ↓
-Agent Governance Toolkit
-   ↓
-agent-failsafe adapter
-   ↓
-FailSafe runtime engine
-   ↓
-Tool execution
-```
-
 ## Installation
 
 ```bash
