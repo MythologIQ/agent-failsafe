@@ -8,7 +8,14 @@
 
 FailSafe governance adapter for the [Microsoft Agent Governance Toolkit](https://github.com/microsoft/agent-governance-toolkit).
 
-Bridges FailSafe's governance engine (Shadow Genome, risk grading, trust dynamics) into the toolkit's extension points. FailSafe adapts to the toolkit, not the reverse.
+agent-failsafe is a Python adapter that connects the FailSafe runtime governance engine to the Microsoft Agent Governance Toolkit.
+
+• Adds runtime behavioral governance to the toolkit
+• Detects failure patterns such as tool recursion and reasoning collapse
+• Integrates through interceptors, validators, and policy providers
+• Install with `pip install agent-failsafe`
+
+Core runtime: [https://github.com/MythologIQ/Failsafe](https://github.com/MythologIQ/Failsafe)
 
 Core runtime:
 https://github.com/MythologIQ/Failsafe
@@ -70,7 +77,21 @@ pip install agent-failsafe[full]
 | `FailSafeTrustMapper` | DID translation (`did:myth` <> `did:mesh`) | `trust_mapper.py` |
 | `decision_to_webhook_event` | `WebhookEvent` translation | `webhook_events.py` |
 
-## Quick Start
+## Architecture Diagram
+
+```text
+AI Agent
+↓
+Agent Governance Toolkit
+↓
+agent-failsafe adapter
+↓
+FailSafe runtime engine
+↓
+Tool execution
+```
+
+## Basic Usage Example
 
 Basic interceptor example
 
@@ -82,21 +103,33 @@ result = interceptor.intercept(request)
 ```
 
 ```python
-from agent_failsafe import LocalFailSafeClient, GovernancePipeline, DecisionRequest
+from agent_failsafe import FailSafeInterceptor
 
-client = LocalFailSafeClient()
-pipeline = GovernancePipeline(client=client)
-
-request = DecisionRequest(action="file.write", agent_did="did:myth:scrivener:abc")
-result = pipeline.evaluate(request)
-
-if result.allowed:
-    print(f"Allowed. Ring: {result.execution_ring}")
-else:
-    print(f"Denied at {result.stage.value}: {result.halted_reason}")
+interceptor = FailSafeInterceptor()
+result = interceptor.intercept(request)
 ```
 
 See [docs/ADAPTER_ARCHITECTURE.md](docs/ADAPTER_ARCHITECTURE.md) for full API reference.
+
+## Ecosystem
+
+FailSafe runtime engine
+[https://github.com/MythologIQ/Failsafe](https://github.com/MythologIQ/Failsafe)
+
+Developer extension
+[https://marketplace.visualstudio.com/items?itemName=MythologIQ.mythologiq-failsafe](https://marketplace.visualstudio.com/items?itemName=MythologIQ.mythologiq-failsafe)
+[https://open-vsx.org/extension/MythologIQ/mythologiq-failsafe](https://open-vsx.org/extension/MythologIQ/mythologiq-failsafe)
+
+## Recommended GitHub Topics
+
+- ai-agents
+- agent-governance
+- agentic-ai
+- ai-runtime
+- ai-reliability
+- llm-agents
+- ai-infrastructure
+- open-source
 
 ## License
 
