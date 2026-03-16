@@ -27,6 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+server = ["fastapi>=0.100.0", "uvicorn>=0.20.0"]
 agent-os = ["agent-os-kernel>=1.1.0"]
 agent-sre = ["agent-sre>=1.1.0"]
 agent-mesh = ["agentmesh-platform>=1.1.0"]
