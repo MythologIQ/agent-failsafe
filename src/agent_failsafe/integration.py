@@ -12,6 +12,7 @@ from typing import Any
 from agent_os.integrations.base import BaseIntegration, GovernanceEventType
 from agent_os.integrations.registry import register_adapter
 
+from .agent_metrics import AgentMetricsRegistry
 from .audit_sink import FailSafeAuditSink, decision_to_audit_entry
 from .escalation import FailSafeApprovalBackend
 from .interceptor import FailSafeInterceptor
@@ -72,6 +73,7 @@ class FailSafeKernel(BaseIntegration):
         approval_backend: FailSafeApprovalBackend | None = None,
         pipeline: GovernancePipeline | None = None,
         webhook_notifier: Any | None = None,
+        agent_metrics: AgentMetricsRegistry | None = None,
         **kw: Any,
     ) -> None:
         super().__init__(**kw)
@@ -81,6 +83,7 @@ class FailSafeKernel(BaseIntegration):
         self.audit_sink = audit_sink
         self.approval_backend = approval_backend
         self.webhook_notifier = webhook_notifier
+        self.agent_metrics = agent_metrics
         self.interceptor = FailSafeInterceptor(
             client=client,
             default_agent_did=default_agent_did,
@@ -92,9 +95,17 @@ class FailSafeKernel(BaseIntegration):
     @property
     def _has_backends(self) -> bool:
         """Check if any backend is configured."""
-        return any((self.sli, self.audit_sink, self.approval_backend, self.webhook_notifier))
+        return any((
+            self.sli, self.audit_sink, self.approval_backend,
+            self.webhook_notifier, self.agent_metrics,
+        ))
 
-    def _on_decision(self, request: DecisionRequest, response: DecisionResponse) -> None:
+    def _on_decision(
+        self,
+        request: DecisionRequest,
+        response: DecisionResponse,
+        latency_ms: float = 0.0,
+    ) -> None:
         """Dispatch a governance decision to configured backends."""
         if self.sli is not None:
             self.sli.record_decision(response)
@@ -106,6 +117,10 @@ class FailSafeKernel(BaseIntegration):
                 self.approval_backend.submit(request)
         if self.webhook_notifier is not None:
             self._emit_webhook(request, response)
+        if self.agent_metrics is not None:
+            self.agent_metrics.record_decision(
+                request.agent_did, response.allowed, latency_ms,
+            )
 
     def _emit_webhook(self, request: DecisionRequest, response: DecisionResponse) -> None:
         """Translate decision to WebhookEvent and send via notifier."""

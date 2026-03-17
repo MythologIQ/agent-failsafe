@@ -100,3 +100,95 @@ class TestSignalReasonTruncation:
             # The message should not contain 500 x's
             assert len(result.message) < 500
             assert "x" * 201 not in result.message
+
+
+class TestGetSlis:
+    def test_empty_sli_returns_seven_metrics(self):
+        """get_slis() returns 7 SliMetric objects even when empty."""
+        sli = FailSafeComplianceSLI()
+        metrics = sli.get_slis()
+
+        assert len(metrics) == 7
+        names = [m.name for m in metrics]
+        assert "Availability" in names
+        assert "Latency P99" in names
+        assert "Error Rate" in names
+        assert "Throughput" in names
+        assert "Trust Score" in names
+        assert "Coverage" in names
+        assert "Decision Latency" in names
+
+    def test_slis_with_data(self):
+        """get_slis() reflects recorded decisions."""
+        sli = FailSafeComplianceSLI()
+        for _ in range(10):
+            sli.record_decision(DecisionResponse(allowed=True))
+
+        metrics = sli.get_slis()
+        availability = next(m for m in metrics if m.name == "Availability")
+
+        assert availability.current_value == 1.0
+        assert availability.total_decisions == 10
+
+    def test_slis_targets(self):
+        """Each SLI has expected target values."""
+        sli = FailSafeComplianceSLI()
+        metrics = sli.get_slis()
+
+        targets = {m.name: m.target for m in metrics}
+        assert targets["Availability"] == 0.999
+        assert targets["Latency P99"] == 0.95
+        assert targets["Error Rate"] == 0.99
+        assert targets["Throughput"] == 0.90
+        assert targets["Trust Score"] == 0.80
+        assert targets["Coverage"] == 0.90
+        assert targets["Decision Latency"] == 0.95
+
+    def test_slis_error_budget(self):
+        """Availability and Coverage SLIs have error budget."""
+        sli = FailSafeComplianceSLI()
+        for _ in range(10):
+            sli.record_decision(DecisionResponse(allowed=True))
+
+        metrics = sli.get_slis()
+        availability = next(m for m in metrics if m.name == "Availability")
+        coverage = next(m for m in metrics if m.name == "Coverage")
+
+        # 100% compliance, so error budget should be positive
+        assert availability.error_budget_remaining is not None
+        assert availability.error_budget_remaining > 0
+        assert coverage.error_budget_remaining is not None
+        assert coverage.error_budget_remaining > 0
+
+    def test_slis_to_dict(self):
+        """SliMetric.to_dict() serializes correctly."""
+        sli = FailSafeComplianceSLI()
+        sli.record_decision(DecisionResponse(allowed=True))
+        metrics = sli.get_slis()
+        availability = next(m for m in metrics if m.name == "Availability")
+
+        d = availability.to_dict()
+        assert d["name"] == "Availability"
+        assert d["target"] == 0.999
+        assert "currentValue" in d
+        assert "meetingTarget" in d
+        assert "totalDecisions" in d
+
+    def test_throughput_with_no_data(self):
+        """Throughput SLI is None when no decisions recorded."""
+        sli = FailSafeComplianceSLI()
+        metrics = sli.get_slis()
+        throughput = next(m for m in metrics if m.name == "Throughput")
+
+        assert throughput.current_value is None
+        assert throughput.meeting_target is None
+
+    def test_throughput_with_data(self):
+        """Throughput SLI is 1.0 when decisions exist."""
+        sli = FailSafeComplianceSLI()
+        sli.record_decision(DecisionResponse(allowed=True))
+        metrics = sli.get_slis()
+        throughput = next(m for m in metrics if m.name == "Throughput")
+
+        assert throughput.current_value == 1.0
+        assert throughput.meeting_target is True

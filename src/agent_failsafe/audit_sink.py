@@ -240,3 +240,69 @@ class FailSafeAuditSink:
             self._entry_count += 1
         except Exception as exc:
             logger.error("Failed to write audit entry: %s", exc)
+
+    def get_recent_events(self, limit: int = 100) -> list:
+        """Return most recent audit events as AuditEvent objects.
+
+        Queries SQLite ledger for recent entries and converts to AuditEvent.
+        Returns newest first (descending timestamp order).
+        """
+        from .types import AuditEvent
+
+        try:
+            cursor = self._conn.execute(
+                "SELECT entry_id, timestamp, action, agent_did, policy_decision, "
+                "data, resource FROM audit_entries ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cursor.fetchall()
+        except Exception as exc:
+            logger.warning("Failed to fetch recent events: %s", exc)
+            return []
+
+        events = []
+        for row in rows:
+            entry_id, timestamp, action, agent_did, policy_decision, data_json, resource = row
+            verdict_action = self._verdict_str_to_action(policy_decision)
+            reason = self._extract_reason(data_json)
+
+            events.append(
+                AuditEvent(
+                    id=entry_id,
+                    timestamp=timestamp,
+                    type=action,
+                    agent_id=agent_did,
+                    action=verdict_action,
+                    reason=reason,
+                    resource=resource,
+                )
+            )
+        return events
+
+    @staticmethod
+    def _verdict_str_to_action(verdict_str: str | None) -> str:
+        """Map verdict string to ALLOW/DENY/AUDIT.
+
+        PASS → ALLOW
+        WARN, ESCALATE → AUDIT
+        BLOCK, QUARANTINE → DENY
+        """
+        if verdict_str is None:
+            return "AUDIT"
+        v = verdict_str.upper()
+        if v == "PASS":
+            return "ALLOW"
+        elif v in ("BLOCK", "QUARANTINE"):
+            return "DENY"
+        return "AUDIT"
+
+    @staticmethod
+    def _extract_reason(data_json: str | None) -> str | None:
+        """Extract reason from data JSON, returning None on error."""
+        if not data_json:
+            return None
+        try:
+            data = json.loads(data_json)
+            return data.get("reason")
+        except json.JSONDecodeError:
+            return None

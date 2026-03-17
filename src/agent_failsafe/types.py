@@ -183,6 +183,138 @@ class HeuristicResult:
 
 
 # ---------------------------------------------------------------------------
+# SRE v2 types (circuit breaker, fleet health, multi-SLI)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CircuitBreakerConfig:
+    """Configuration for circuit breaker thresholds."""
+
+    half_open_threshold: int = 3  # Failures before half-open
+    open_threshold: int = 5  # Failures before open
+    recovery_threshold: int = 1  # Successes in half-open to close
+
+
+@dataclass
+class TrustDimension:
+    """Single dimension of trust scoring."""
+
+    name: str
+    score: float  # 0.0-1.0
+    weight: float  # 0.0-1.0, weights should sum to 1.0
+
+
+@dataclass
+class TrustScoreV2:
+    """Agent trust score with optional dimensional breakdown."""
+
+    agent_id: str
+    stage: str  # CBT, KBT, IBT
+    mesh_score: float
+    total_score: Optional[float] = None
+    tier: Optional[str] = None  # untrusted, limited, trusted, privileged
+    dimensions: Optional[list[TrustDimension]] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        d: dict[str, Any] = {
+            "agentId": self.agent_id,
+            "stage": self.stage,
+            "meshScore": self.mesh_score,
+        }
+        if self.total_score is not None:
+            d["totalScore"] = self.total_score
+        if self.tier is not None:
+            d["tier"] = self.tier
+        if self.dimensions:
+            d["dimensions"] = [
+                {"name": dim.name, "score": dim.score, "weight": dim.weight}
+                for dim in self.dimensions
+            ]
+        return d
+
+
+@dataclass
+class AuditEvent:
+    """Governance audit event for Activity Feed."""
+
+    id: str
+    timestamp: str  # ISO 8601
+    type: str  # file.write, config.modify, dependency.add, etc.
+    agent_id: str
+    action: str  # ALLOW, DENY, AUDIT
+    reason: Optional[str] = None
+    resource: Optional[str] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        d: dict[str, Any] = {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "type": self.type,
+            "agentId": self.agent_id,
+            "action": self.action,
+        }
+        if self.reason is not None:
+            d["reason"] = self.reason
+        if self.resource is not None:
+            d["resource"] = self.resource
+        return d
+
+
+@dataclass
+class FleetAgent:
+    """Per-agent health status for Fleet Health section."""
+
+    agent_id: str
+    status: str  # active, idle, error
+    circuit_state: str  # closed, open, half-open
+    task_count: int
+    success_rate: float  # 0.0-1.0
+    avg_latency_ms: float
+    last_active_at: str  # ISO 8601
+    trust_stage: str  # CBT, KBT, IBT - derived from success_rate
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        return {
+            "agentId": self.agent_id,
+            "status": self.status,
+            "circuitState": self.circuit_state,
+            "taskCount": self.task_count,
+            "successRate": self.success_rate,
+            "avgLatencyMs": self.avg_latency_ms,
+            "lastActiveAt": self.last_active_at,
+        }
+
+
+@dataclass
+class SliMetric:
+    """Individual SLI for multi-SLI dashboard."""
+
+    name: str
+    target: float  # 0.0-1.0
+    current_value: Optional[float]  # 0.0-1.0, None if no data
+    meeting_target: Optional[bool]
+    total_decisions: int
+    error_budget_remaining: Optional[float] = None  # 0.0-1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to JSON-compatible dict with camelCase keys."""
+        d: dict[str, Any] = {
+            "name": self.name,
+            "target": self.target,
+            "currentValue": self.current_value,
+            "meetingTarget": self.meeting_target,
+            "totalDecisions": self.total_decisions,
+        }
+        if self.error_budget_remaining is not None:
+            d["errorBudgetRemaining"] = self.error_budget_remaining
+        return d
+
+
+# ---------------------------------------------------------------------------
 # FailSafe client protocol
 # ---------------------------------------------------------------------------
 

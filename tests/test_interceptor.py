@@ -166,27 +166,29 @@ class TestFailSafeInterceptor:
 
 class TestOnDecisionCallback:
     def test_on_decision_called_on_allow(self):
-        """Callback receives (request, response) when tool call is allowed."""
+        """Callback receives (request, response, latency_ms) when tool call is allowed."""
         captured = []
         client = MockFailSafeClient(DecisionResponse(allowed=True))
-        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp: captured.append((req, resp)))
+        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp, lat: captured.append((req, resp, lat)))
 
         interceptor.intercept(MockToolCallRequest(tool_name="read_file"))
         assert len(captured) == 1
         assert isinstance(captured[0][0], DecisionRequest)
         assert captured[0][1].allowed is True
+        assert captured[0][2] >= 0  # latency_ms is non-negative
 
     def test_on_decision_called_on_block(self):
-        """Callback receives (request, response) when tool call is blocked."""
+        """Callback receives (request, response, latency_ms) when tool call is blocked."""
         captured = []
         client = MockFailSafeClient(DecisionResponse(
             allowed=False, risk_grade=RiskGrade.L3, verdict=VerdictDecision.BLOCK,
         ))
-        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp: captured.append((req, resp)))
+        interceptor = FailSafeInterceptor(client=client, on_decision=lambda req, resp, lat: captured.append((req, resp, lat)))
 
         interceptor.intercept(MockToolCallRequest(tool_name="write_file"))
         assert len(captured) == 1
         assert captured[0][1].allowed is False
+        assert captured[0][2] >= 0  # latency_ms is non-negative
 
     def test_on_decision_not_called_on_fail_open(self):
         """Callback is NOT invoked when client.evaluate raises (fail-open path)."""

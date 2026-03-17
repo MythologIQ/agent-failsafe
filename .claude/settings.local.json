@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_agent_metrics.py tests/test_sli.py tests/test_audit_sink.py tests/test_rest_server.py -v --tb=short)",
+      "Bash(python -m pytest:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

@@ -58,7 +58,7 @@ from .trust import (
 from .trust_validator import FailSafeTrustValidator
 from .webhook_events import decision_to_webhook_event, decisions_to_webhook_events
 
-__version__ = "0.4.0"
+__version__ = "0.6.0"
 
 __all__ = [
     # Types

@@ -115,3 +115,111 @@ def test_snapshot_asi06_present(client):
     """ASI-06 Delegation Chain Visibility key is present."""
     asi = client.get("/sre/snapshot").json()["asiCoverage"]
     assert "ASI-06" in asi
+
+
+# ── v2 SRE endpoints ──────────────────────────────────────────────────────────
+
+
+def test_snapshot_v2_fields(client):
+    """/sre/snapshot includes v2 fields: slis, auditEvents, fleet."""
+    data = client.get("/sre/snapshot").json()
+    assert "slis" in data
+    assert "auditEvents" in data
+    assert "fleet" in data
+
+
+def test_snapshot_v2_slis_from_sli():
+    """/sre/snapshot slis array reflects sli.get_slis()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    sli = MagicMock()
+    sli.to_dict.return_value = {"name": "compliance"}
+    mock_metric = MagicMock()
+    mock_metric.to_dict.return_value = {"name": "Availability", "target": 0.999}
+    sli.get_slis.return_value = [mock_metric]
+    app = mod.create_sre_app(sli=sli)
+    data = TestClient(app).get("/sre/snapshot").json()
+    assert data["slis"] == [{"name": "Availability", "target": 0.999}]
+
+
+def test_snapshot_v2_audit_events():
+    """/sre/snapshot auditEvents reflects audit_sink.get_recent_events()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    sink = MagicMock()
+    mock_event = MagicMock()
+    mock_event.to_dict.return_value = {"id": "ev1", "type": "file.write", "action": "ALLOW"}
+    sink.get_recent_events.return_value = [mock_event]
+    app = mod.create_sre_app(audit_sink=sink)
+    data = TestClient(app).get("/sre/snapshot").json()
+    assert data["auditEvents"] == [{"id": "ev1", "type": "file.write", "action": "ALLOW"}]
+
+
+def test_snapshot_v2_fleet():
+    """/sre/snapshot fleet reflects agent_metrics.get_fleet_agents()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    metrics = MagicMock()
+    mock_agent = MagicMock()
+    mock_agent.to_dict.return_value = {"agentId": "did:myth:test", "status": "active"}
+    metrics.get_fleet_agents.return_value = [mock_agent]
+    app = mod.create_sre_app(agent_metrics=metrics)
+    data = TestClient(app).get("/sre/snapshot").json()
+    assert data["fleet"] == [{"agentId": "did:myth:test", "status": "active"}]
+
+
+# ── /sre/events endpoint ──────────────────────────────────────────────────────
+
+
+def test_events_endpoint_empty(client):
+    """/sre/events returns empty array when no audit_sink."""
+    resp = client.get("/sre/events")
+    assert resp.status_code == 200
+    assert resp.json() == {"events": []}
+
+
+def test_events_endpoint_with_sink():
+    """/sre/events returns events from audit_sink.get_recent_events()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    sink = MagicMock()
+    mock_event = MagicMock()
+    mock_event.to_dict.return_value = {"id": "ev1", "action": "ALLOW"}
+    sink.get_recent_events.return_value = [mock_event]
+    app = mod.create_sre_app(audit_sink=sink)
+    data = TestClient(app).get("/sre/events").json()
+    assert data["events"] == [{"id": "ev1", "action": "ALLOW"}]
+
+
+def test_events_endpoint_respects_limit():
+    """/sre/events?limit=N passes limit to get_recent_events()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    sink = MagicMock()
+    sink.get_recent_events.return_value = []
+    app = mod.create_sre_app(audit_sink=sink)
+    TestClient(app).get("/sre/events?limit=25")
+    sink.get_recent_events.assert_called_with(limit=25)
+
+
+# ── /sre/fleet endpoint ───────────────────────────────────────────────────────
+
+
+def test_fleet_endpoint_empty(client):
+    """/sre/fleet returns empty array when no agent_metrics."""
+    resp = client.get("/sre/fleet")
+    assert resp.status_code == 200
+    assert resp.json() == {"agents": []}
+
+
+def test_fleet_endpoint_with_metrics():
+    """/sre/fleet returns agents from agent_metrics.get_fleet_agents()."""
+    from fastapi.testclient import TestClient
+    mod = _import_module()
+    metrics = MagicMock()
+    mock_agent = MagicMock()
+    mock_agent.to_dict.return_value = {"agentId": "did:myth:test", "status": "active"}
+    metrics.get_fleet_agents.return_value = [mock_agent]
+    app = mod.create_sre_app(agent_metrics=metrics)
+    data = TestClient(app).get("/sre/fleet").json()
+    assert data["agents"] == [{"agentId": "did:myth:test", "status": "active"}]

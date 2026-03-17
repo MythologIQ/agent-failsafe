@@ -182,3 +182,101 @@ class TestHmacKeyRequired:
         assert "super-secret-key" not in r
         assert "FailSafeAuditSink" in r
         sink.close()
+
+
+class TestGetRecentEvents:
+    def test_empty_ledger_returns_empty_list(self, tmp_path):
+        """get_recent_events() returns [] when ledger is empty."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        events = sink.get_recent_events()
+        assert events == []
+        sink.close()
+
+    def test_returns_audit_events(self, tmp_path):
+        """get_recent_events() returns AuditEvent objects."""
+        from agent_failsafe.types import AuditEvent
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="ev1", action="file.write", policy_decision="PASS"))
+        sink.write(MockAuditEntry(entry_id="ev2", action="file.delete", policy_decision="BLOCK"))
+
+        events = sink.get_recent_events()
+        assert len(events) == 2
+        assert all(isinstance(e, AuditEvent) for e in events)
+        sink.close()
+
+    def test_returns_newest_first(self, tmp_path):
+        """get_recent_events() returns events in descending order (newest first)."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="first"))
+        sink.write(MockAuditEntry(entry_id="second"))
+        sink.write(MockAuditEntry(entry_id="third"))
+
+        events = sink.get_recent_events()
+        assert events[0].id == "third"
+        assert events[1].id == "second"
+        assert events[2].id == "first"
+        sink.close()
+
+    def test_respects_limit(self, tmp_path):
+        """get_recent_events(limit=N) returns at most N events."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        for i in range(10):
+            sink.write(MockAuditEntry(entry_id=f"ev{i}"))
+
+        events = sink.get_recent_events(limit=3)
+        assert len(events) == 3
+        sink.close()
+
+    def test_verdict_mapping_pass(self, tmp_path):
+        """PASS verdict maps to ALLOW action."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="ev1", policy_decision="PASS"))
+
+        events = sink.get_recent_events()
+        assert events[0].action == "ALLOW"
+        sink.close()
+
+    def test_verdict_mapping_block(self, tmp_path):
+        """BLOCK verdict maps to DENY action."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="ev1", policy_decision="BLOCK"))
+
+        events = sink.get_recent_events()
+        assert events[0].action == "DENY"
+        sink.close()
+
+    def test_verdict_mapping_warn(self, tmp_path):
+        """WARN verdict maps to AUDIT action."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="ev1", policy_decision="WARN"))
+
+        events = sink.get_recent_events()
+        assert events[0].action == "AUDIT"
+        sink.close()
+
+    def test_extracts_reason_from_data(self, tmp_path):
+        """Reason is extracted from data JSON."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(
+            entry_id="ev1",
+            data={"reason": "Suspicious pattern detected", "extra": "ignored"},
+        ))
+
+        events = sink.get_recent_events()
+        assert events[0].reason == "Suspicious pattern detected"
+        sink.close()
+
+    def test_event_to_dict(self, tmp_path):
+        """AuditEvent.to_dict() serializes with camelCase keys."""
+        sink = FailSafeAuditSink(ledger_path=tmp_path / "events.db", hmac_key=b"test-key")
+        sink.write(MockAuditEntry(entry_id="ev1", agent_did="did:myth:test", action="file.write"))
+
+        events = sink.get_recent_events()
+        d = events[0].to_dict()
+
+        assert d["id"] == "ev1"
+        assert d["agentId"] == "did:myth:test"
+        assert d["type"] == "file.write"
+        assert "timestamp" in d
+        assert "action" in d
+        sink.close()

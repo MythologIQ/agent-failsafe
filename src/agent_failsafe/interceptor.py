@@ -7,13 +7,14 @@ FailSafe governance decisions on every tool call.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable
 
 from .types import DecisionRequest, DecisionResponse, FailSafeClient, RiskGrade, VerdictDecision
 
 logger = logging.getLogger(__name__)
 
-DecisionCallback = Callable[["DecisionRequest", "DecisionResponse"], None]
+DecisionCallback = Callable[["DecisionRequest", "DecisionResponse", float], None]
 
 # Lazy imports — toolkit packages are optional dependencies
 _ToolCallRequest = None
@@ -106,6 +107,7 @@ class FailSafeInterceptor:
             payload={"tool_name": tool_name, "arguments": arguments},
         )
 
+        start_time = time.perf_counter()
         try:
             response = self.client.evaluate(decision_req)
         except Exception as exc:
@@ -115,9 +117,10 @@ class FailSafeInterceptor:
                 raise
             return _fail_open_result()
 
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
         self._decision_count += 1
         if self.on_decision is not None:
-            self.on_decision(decision_req, response)
+            self.on_decision(decision_req, response, latency_ms)
 
         if not response.allowed:
             self._block_count += 1

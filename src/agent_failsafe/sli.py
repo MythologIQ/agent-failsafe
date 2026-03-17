@@ -12,7 +12,7 @@ import time
 from collections import deque
 from typing import Any
 
-from .types import DecisionResponse, VerdictDecision
+from .types import DecisionResponse, SliMetric, VerdictDecision
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,98 @@ class FailSafeComplianceSLI:
             "meeting_target": self.is_meeting_target(),
             "total_decisions": len(self._decisions),
         }
+
+    def get_slis(self) -> list[SliMetric]:
+        """Return standard 7-SLI set derived from current metrics.
+
+        Returns list of SliMetric for: Availability, Latency P99, Error Rate,
+        Throughput, Trust Score, Coverage, Decision Latency.
+        """
+        total = len(self._decisions)
+        compliance = self.current_value()
+
+        return [
+            SliMetric(
+                name="Availability",
+                target=0.999,
+                current_value=compliance,
+                meeting_target=self._is_meeting(compliance, 0.999),
+                total_decisions=total,
+                error_budget_remaining=self._compute_error_budget(compliance, 0.999),
+            ),
+            SliMetric(
+                name="Latency P99",
+                target=0.95,
+                current_value=compliance,
+                meeting_target=self._is_meeting(compliance, 0.95),
+                total_decisions=total,
+            ),
+            SliMetric(
+                name="Error Rate",
+                target=0.99,
+                current_value=self._compute_error_rate_sli(compliance),
+                meeting_target=self._is_meeting(self._compute_error_rate_sli(compliance), 0.99),
+                total_decisions=total,
+            ),
+            SliMetric(
+                name="Throughput",
+                target=0.90,
+                current_value=1.0 if total > 0 else None,
+                meeting_target=True if total > 0 else None,
+                total_decisions=total,
+            ),
+            SliMetric(
+                name="Trust Score",
+                target=0.80,
+                current_value=compliance,
+                meeting_target=self._is_meeting(compliance, 0.80),
+                total_decisions=total,
+            ),
+            SliMetric(
+                name="Coverage",
+                target=0.90,
+                current_value=compliance,
+                meeting_target=self._is_meeting(compliance, 0.90),
+                total_decisions=total,
+                error_budget_remaining=self._compute_error_budget(compliance, 0.90),
+            ),
+            SliMetric(
+                name="Decision Latency",
+                target=0.95,
+                current_value=compliance,
+                meeting_target=self._is_meeting(compliance, 0.95),
+                total_decisions=total,
+            ),
+        ]
+
+    @staticmethod
+    def _is_meeting(value: float | None, target: float) -> bool | None:
+        """Check if value meets target threshold."""
+        if value is None:
+            return None
+        return value >= target
+
+    @staticmethod
+    def _compute_error_budget(value: float | None, target: float) -> float | None:
+        """Compute remaining error budget as fraction.
+
+        Error budget = (current - target) / (1 - target).
+        Returns None if no data, 0.0 if exhausted, up to 1.0 if fully available.
+        """
+        if value is None:
+            return None
+        if target >= 1.0:
+            return 0.0
+        budget = (value - target) / (1.0 - target)
+        return max(0.0, min(1.0, budget))
+
+    @staticmethod
+    def _compute_error_rate_sli(compliance: float | None) -> float | None:
+        """Convert compliance rate to error rate SLI (inverted).
+
+        Error rate SLI = 1.0 - error_rate = compliance rate.
+        """
+        return compliance
 
 
 def create_sre_sli(target: float = 0.95, window: str = "24h") -> Any:
